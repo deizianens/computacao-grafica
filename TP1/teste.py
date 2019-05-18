@@ -3,19 +3,24 @@ import sys
 from OpenGL.GL import *
 from OpenGL.GL import shaders
 from OpenGL.GLU import *
+from OpenGL.GLUT import *
 import pyrr
 import glfw
 import numpy
+import math
+
+PI = 3.14
 
 # shaders
 vertex_shader = '''
 #version 330
 
-attribute vec3 position;
-attribute vec3 normal;
+in vec3 position;
+in vec3 normal;
+
 uniform mat4 projection, modelview, normalMat;
-varying vec3 normalInterp;
-varying vec3 vertPos;
+out vec3 normalInterp;
+out vec3 vertPos;
 
 uniform float Ka;   // Ambient reflection coefficient
 uniform float Kd;   // Diffuse reflection coefficient
@@ -27,7 +32,8 @@ uniform vec3 ambientColor;
 uniform vec3 diffuseColor;
 uniform vec3 specularColor;
 uniform vec3 lightPos; // Light position
-varying vec4 color; //color
+
+out vec3 color; //color
 
 void main(){
   vec4 vertPos4 = modelview * vec4(position, 1.0);
@@ -58,7 +64,7 @@ void main(){
 fragment_shader = '''
 #version 330
 
-precision mediump float;
+// precision mediump float;
 
 varying vec3 normalInterp;  // Surface normal
 varying vec3 vertPos;       // Vertex position
@@ -68,16 +74,19 @@ uniform float Kd;   // Diffuse reflection coefficient
 uniform float Ks;   // Specular reflection coefficient
 uniform float shininessVal; // Shininess
 
+uniform int shading;
+
 // Material color
 uniform vec3 ambientColor;
 uniform vec3 diffuseColor;
 uniform vec3 specularColor;
 uniform vec3 lightPos; // Light position
 
+varying vec4 color;
 
 void main()
 {    
-    if(shading_type == 0) //flat
+    if(shading == 0) //flat
     {
         float diff = max(0.0, dot(normalize(normalInterp), normalize(lightPos)));
         vFragColor = diff * diffuseColor;
@@ -87,11 +96,11 @@ void main()
 
         if(diff != 0) {
         float fSpec = pow(spec, 32.0);
-        gl_FragColor += vec3(fSpec, fSpec, fSpec);
+        color += vec3(fSpec, fSpec, fSpec);
     }
-    else if(shading_type == 1) // gouraud
+    else if(shading == 1) // gouraud
     {
-        gl_FragColor = color;
+        color = color;
     }
     else { // phong 
         vec3 N = normalize(normalInterp);
@@ -107,7 +116,7 @@ void main()
             float specAngle = max(dot(R, V), 0.0);
             specular = pow(specAngle, shininessVal);
         }
-        gl_FragColor = vec4(Ka * ambientColor +
+        color = vec4(Ka * ambientColor +
                             Kd * lambertian * diffuseColor +
                             Ks * specular * specularColor, 1.0);
 
@@ -115,207 +124,105 @@ void main()
 }
 '''
 
-class Teapot():
-    def __init__(self):
-        vertices = []
-        faces = []
-        # obj loader super simples
-        with open('teapot.obj', 'r') as obj: # le os vertices e faces do OBJ
-            for line in obj.readlines():
-                line = line.split(' ')
-                if line[0] == 'v':
-                    vertices.append([float(line[1])/3, float(line[2])/3, float(line[3])/3])
-                elif line[0] == 'f':
-                    faces.append([int(line[1])-1, int(line[2])-1, int(line[3])-1])
-        
-        # calculate vertex normals
-        self.vertices = numpy.array(vertices, dtype=numpy.float32)
-        self.faces = numpy.array(faces, dtype=numpy.uint32)
-        vertex_normals = pyrr.vector3.generate_vertex_normals(self.vertices, self.faces)
-        self.vertex_normals = numpy.array(vertex_normals, dtype=numpy.float32).flatten()
-        self.vertices = numpy.array(vertices, dtype=numpy.float32).flatten()
-        self.faces = numpy.array(faces, dtype=numpy.uint32).flatten()
-
-        self.vbo = glGenBuffers(1)
-        glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
-        glBufferData(GL_ARRAY_BUFFER, len(self.vertices) * 4, self.vertices, GL_STATIC_DRAW)
-        self.ebo = glGenBuffers(1)
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.ebo)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, len(self.faces) * 4, self.faces, GL_STATIC_DRAW)
-        self.nbo = glGenBuffers(1)
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.nbo)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, len(self.vertex_normals) * 4, self.vertex_normals, GL_STATIC_DRAW)
-        
-    def render(self, shader):
-        glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
-        position = glGetAttribLocation(shader, 'position')
-        glVertexAttribPointer(position, 3, GL_FLOAT, GL_FALSE, 0, ctypes.c_void_p(0))
-        glEnableVertexAttribArray(position)
-        
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.nbo)
-        vertex_normal = glGetAttribLocation(shader, 'vertex_normal')
-        glVertexAttribPointer(vertex_normal, 3, GL_FLOAT, GL_FALSE, 0, ctypes.c_void_p(0))
-        glEnableVertexAttribArray(vertex_normal)
-        
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.ebo)
-        glDrawElements(GL_TRIANGLES, len(self.faces), GL_UNSIGNED_INT, None)
-
-# material
-class PhongMaterial:
-    def __init__(self, shader, shading_type, albedo_r, albedo_g, albedo_b, specular_constant):
-        self.shader = shader
-        self.shading_type = shading_type
-        self.albedo = [albedo_r, albedo_g, albedo_b]
-        self.specular_constant = specular_constant
-    def set_up_rendering(self):
-        glUseProgram(self.shader)
-        
-        #lighting uniforms
-        r = glGetUniformLocation(self.shader, 'albedo_r')
-        g = glGetUniformLocation(self.shader, 'albedo_g')
-        b = glGetUniformLocation(self.shader, 'albedo_b')
-        glUniform1f(r, self.albedo[0])
-        glUniform1f(g, self.albedo[1])
-        glUniform1f(b, self.albedo[2])
-        
-        ks = glGetUniformLocation(self.shader, 'ks')
-        glUniform1f(ks, self.specular_constant)
-        
-        st = glGetUniformLocation(self.shader, 'shading_type')
-        if self.shading_type == 'gouraud':
-            glUniform1i(st, 1)
-        elif self.shading_type == 'phong':
-            glUniform1i(st, 2)
-        else:
-            glUniform1i(st, 0)
-
 class Shape:
-    def __init__(self, shape_type, material):
+    def __init__(self, shape, shader):
         self.material = material
-        self.shape_type = shape_type
-        self.teapot = Teapot()
+        self.shape = shape
+        self.shader = shader
+
     def render(self):
-        self.material.set_up_rendering()
+        setupShaders()
         
         #transformation uniforms
         model_transform = pyrr.Matrix44.identity()
         perspective_transform = pyrr.Matrix44.perspective_projection(45, 4/3, 0.01, 100)
         camera_transform = pyrr.Matrix44.look_at((2, 2, 2), (0, 0, 0), (0, 1, 0))
         
-        mt_loc = glGetUniformLocation(self.material.shader, 'model_transform')
-        glUniformMatrix4fv(mt_loc, 1, GL_FALSE, model_transform)
-        pr_loc = glGetUniformLocation(self.material.shader, 'projection')
-        glUniformMatrix4fv(pr_loc, 1, GL_FALSE, perspective_transform)
-        cam_loc = glGetUniformLocation(self.material.shader, 'camera')
-        glUniformMatrix4fv(cam_loc, 1, GL_FALSE, camera_transform)
-        cam_pos_loc = glGetUniformLocation(self.material.shader, 'camera_pos_input')
-        glUniform3f(cam_pos_loc, 2, 2, 2)
+        modelviewLoc = glGetUniformLocation(self.shader, 'modelView')
+        glUniformMatrix4fv(modelviewLoc, 1, GL_FALSE, model_transform)
+        projectionLoc = glGetUniformLocation(self.shader, 'projection')
+        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, perspective_transform)
         
-        qobj = gluNewQuadric()
-        gluQuadricNormals(qobj, GLU_SMOOTH)
-        gluQuadricOrientation(qobj, GLU_OUTSIDE)
-        if self.shape_type == 'sphere':
-            vn = glGetAttribLocation(self.material.shader, 'vertex_normal')
-            glVertexAttrib3f(vn, 0.0, 0.0, 0.0)
-            glDisableVertexAttribArray(vn)
-            gluSphere(qobj, 1, 50, 50)
-        elif self.shape_type == 'cylinder':
-            vn = glGetAttribLocation(self.material.shader, 'vertex_normal')
-            glVertexAttrib3f(vn, 0.0, 0.0, 0.0)
-            glDisableVertexAttribArray(vn)
-            gluCylinder(qobj, 1, 1, 1, 50, 50)
+        quad = gluNewQuadric()
+        gluQuadricNormals(quad, GLU_SMOOTH)
+        gluQuadricOrientation(quad, GLU_OUTSIDE)
+        if self.shape == 'sphere':
+            gluSphere(quad, 2.0, 256, 256) # parameters: GLUquadric* quad, GLdouble radius, GLint slices, GLint stacks
+        elif self.shape == 'cylinder':
+            gluCylinder(quad, 2.0, 2.0, 5.0, 256, 256) # parameters: GLUquadric* quad, GLdouble base, GLdouble top, GLdouble height, GLint slices, GLint stacks
         else:
-            self.teapot.render(self.material.shader)
+            glutSolidTeapot(50.0)
 
-def get_input(window, shape, flags):
-    if glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS:
-        if glfw.get_key(window, glfw.KEY_S) == glfw.PRESS:
-            shape.material.specular_constant -= 0.001
-            if shape.material.specular_constant <= 0:
-                shape.material.specular_constant = 0
-                
-        if glfw.get_key(window, glfw.KEY_R) == glfw.PRESS:
-            shape.material.albedo[0] -= 0.01
-            if shape.material.albedo[0] <= 0:
-                shape.material.albedo[0] = 0
-                
-        if glfw.get_key(window, glfw.KEY_G) == glfw.PRESS:
-            shape.material.albedo[1] -= 0.01
-            if shape.material.albedo[1] <= 0:
-                shape.material.albedo[1] = 0
-                
-        if glfw.get_key(window, glfw.KEY_B) == glfw.PRESS:
-            shape.material.albedo[2] -= 0.01
-            if shape.material.albedo[2] <= 0:
-                shape.material.albedo[2] = 0
-                
-    if glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS:
-        if glfw.get_key(window, glfw.KEY_S) == glfw.PRESS:
-            shape.material.specular_constant += 0.001
-            if shape.material.specular_constant >= 1:
-                shape.material.specular_constant = 1
-                
-        if glfw.get_key(window, glfw.KEY_R) == glfw.PRESS:
-            shape.material.albedo[0] += 0.01
-            if shape.material.albedo[0] >= 1:
-                shape.material.albedo[0] = 1
-                
-        if glfw.get_key(window, glfw.KEY_G) == glfw.PRESS:
-            shape.material.albedo[1] += 0.01
-            if shape.material.albedo[1] >= 1:
-                shape.material.albedo[1] = 1
-                
-        if glfw.get_key(window, glfw.KEY_B) == glfw.PRESS:
-            shape.material.albedo[2] += 0.01
-            if shape.material.albedo[2] >= 1:
-                shape.material.albedo[2] = 1
-                
-    if glfw.get_key(window, glfw.KEY_ENTER) == glfw.PRESS and not flags[0]:
-        if shape.material.shading_type == 'flat':
-            shape.material.shading_type = 'gouraud'
-        elif shape.material.shading_type == 'gouraud':
-            shape.material.shading_type = 'phong'
-        elif shape.material.shading_type == 'phong':
-            shape.material.shading_type = 'flat'
-        flags[0] = True
+
+# def display():
+#     glClearColor(0.0, 0.0, 1.0, 1.0)    # glClearColor — specify clear values for the color buffers
+#     glClear(GL_COLOR_BUFFER_BIT)       # glClear — clear buffers to preset values
     
-    if glfw.get_key(window, glfw.KEY_ENTER) == glfw.RELEASE:
-        flags[0] = False
+#     # camera orbits in the z=1.5 plane and looks at the origin
+#     # mat4LookAt replaces gluLookAt
+#     rad = PI / 180.0 * this.t
 
-    if glfw.get_key(window, glfw.KEY_SPACE) == glfw.PRESS and not flags[1]:
-        if shape.shape_type == 'sphere':
-            shape.shape_type = 'cylinder'
-        elif shape.shape_type == 'cylinder':
-            shape.shape_type = 'teapot'
-        elif shape.shape_type == 'teapot':
-            shape.shape_type = 'sphere'
-        flags[1] = True
-        
-    if glfw.get_key(window, glfw.KEY_SPACE) == glfw.RELEASE:
-        flags[1] = False
+#     mat4LookAt(
+#         modelview,
+#         1.5 * math.cos(rad), 1.5 * math.sin(rad), 1.5, # eye
+#         0.0, 0.0, 0.0, # look at
+#         0.0, 0.0, 1.0
+#     ); # up
+
+
+def setupShaders(s, shader):
+    glUseProgram(shader)
+    
+    # retrieve the location of the IN variables of the vertex shader
+    vertexLoc = glGetAttribLocation(shader, "position")
+    normalLoc = glGetAttribLocation(shader, "normal")
+
+    # retrieve the location of the UNIFORM variables of the shader
+    projectionLoc = glGetUniformLocation(shader, "projection")
+    modelviewLoc = glGetUniformLocation(shader, "modelview")
+    normalMatrixLoc = glGetUniformLocation(shader, "normalMat")
+    lightPosLoc = glGetUniformLocation(shader, "lightPos")
+    ambientColorLoc = glGetUniformLocation(shader, "ambientColor")
+    diffuseColorLoc = glGetUniformLocation(shader, "diffuseColor")
+    specularColorLoc = glGetUniformLocation(shader, "specularColor")
+    shininessLoc = glGetUniformLocation(shader, "shininessVal")
+    kaLoc = glGetUniformLocation(shader, "Ka")
+    kdLoc = glGetUniformLocation(shader, "Kd")
+    ksLoc = glGetUniformLocation(shader, "Ks")
+
+    shading = glGetUniformLocation(shader, 'shading')
+    if s == 'flat':
+        glUniform1i(shading, 0)
+    elif s == 'gouraud':
+        glUniform1i(shading, 1)
+    else:
+        glUniform1i(shading, 2)
+
 
 def main():
     if not glfw.init():
         return
-    window = glfw.create_window(1280, 760, 'Shadings', None, None)
+    window = glfw.create_window(800, 800, 'Shadings', None, None)
     if not window:
         glfw.terminate()
         return
     
     glfw.make_context_current(window)
     
-    glClearColor(0.2, 0.3, 0.2, 1.0)
+    glClearColor(0.0, 0.0, 1.0, 1.0)    # glClearColor — specify clear values for the color buffers
     glEnable(GL_DEPTH_TEST)
+    glEnable(GL_CULL_FACE)
     glCullFace(GL_BACK)
     
-    shader = shaders.compileProgram(shaders.compileShader(vertex_shader, GL_VERTEX_SHADER), shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
-    shape = Shape('sphere', PhongMaterial(shader, 'flat', .0, .5, .5, 0.05)) # valores default iniciais
-    key_flags = [False, False]
+    # create shader
+    shader = shaders.compileProgram(shaders.compileShader(vertex_shader, GL_VERTEX_SHADER), 
+                                    shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
+    
+    setupShaders('gouraud', shader)
+    shape = Shape('sphere', shader) 
     
     while not glfw.window_should_close(window):
-        glfw.poll_events()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        get_input(window, shape, key_flags)
         shape.render()
         glfw.swap_buffers(window)
     glfw.terminate()
