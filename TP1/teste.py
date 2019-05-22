@@ -1,431 +1,516 @@
-# faz o setup do ambiente
-import sys
 from OpenGL.GL import *
-from OpenGL.GL import shaders
-from OpenGL.GLU import *
 from OpenGL.GLUT import *
+from OpenGL.GLU import *
+from OpenGL.GL.shaders import *
 
-import glfw
-import math
-import numpy as np
+import sys
 
+from OpenGL.arrays import vbo
+from numpy import array, dot, matrix, identity, cross, tan, linalg
+from math import cos, sin, acos, sqrt, pi
 
-PI = 3.14
 
 # shaders
-vertex_shader = '''
-#version 330
+vertex_shader_flat = '''
+#version 140
 
-in vec3 position;
-in vec3 normal;
-in vec2 TexCoord;
+varying vec4 vVaryingColor;
+out vec4 color;
 
-uniform mat4 projection, modelview, normalMat;
-uniform int mode;
-
-out vec3 normalInterp;
-out vec3 vertPos;
-
-out vec4 vertexColor; //only for gouraud
-
-const vec3 lightPos = vec3(2.0, 1.0, 1.0);
-const vec3 ambientColor = vec3(0.0, 0.1, 0.1);
-const vec3 diffuseColor = vec3(0.0, 0.6, 0.6);
-const vec3 specularColor = vec3(1.0, 1.0, 1.0);
-
-
-void main(){
-    gl_Position = projection * modelview * vec4(position, 1.0);
-
-    // ------------ only for gouraud -----------------
-    vec3 normal = vec3(normalMat * vec4(normal, 0.0));
-    vec4 vertPos4 = modelview * vec4(position, 1.0);
-    vertPos = vec3(vertPos4) / vertPos4.w;
-    normalInterp = vec3(normalMat * vec4(normal, 0.0));
-
-    vec3 lightDir = normalize(lightPos - vertPos);
-    vec3 reflectDir = reflect(-lightDir, normal);
-    vec3 viewDir = normalize(-vertPos);
-
-    float lambertian = max(dot(lightDir,normal), 0.0);
-    float specular = 0.0;
-
-    if(lambertian > 0.0) {
-       float specAngle = max(dot(reflectDir, viewDir), 0.0);
-       specular = pow(specAngle, 4.0);
-    }
-
-    vertexColor = vec4(ambientColor+lambertian*diffuseColor + specular*specularColor, 1.0);
-
+void main(void) 
+{
+	color = vVaryingColor;
 }
 
 '''
 
-fragment_shader = '''
-#version 330
+fragment_shader_flat = '''
+#version 140
 
-precision mediump float;
+varying vec4 vVaryingColor;
+out vec4 color;
 
-in vec3 normalInterp;  // Surface normal
-in vec3 vertPos;       // Vertex position
-in vec4 vertexColor;  // Only for gouraud
+void main(void) 
+{
+	color = vVaryingColor;
+}
+'''
 
-const vec3 lightPos = vec3(2.0,1.0,1.0);
-const vec3 ambientColor = vec3(0.0, 0.1, 0.1);
-const vec3 diffuseColor = vec3(0.0, 0.6, 0.6);
-const vec3 specularColor = vec3(1.0, 1.0, 1.0);
+vertex_shader_gouraud = '''
+#version 140
 
-uniform int shading = 2;
+uniform vec4 ambientColor; 
+uniform vec4 diffuseColor; 
+uniform vec4 specularColor; 
+
+uniform vec3 lightPosition; 
+
+uniform mat4 mvpMatrix; 
+uniform mat4 mvMatrix; 
+uniform mat3 normalMatrix; 
+
+varying vec4 varyingColor;
 
 out vec4 color;
 
-void main(){    
-    //flat
-    if(shading == 0) {
-        vec3 normal = normalize(normalInterp);
-        vec3 lightDir = normalize(lightPos - vertPos);
-        vec3 reflectDir = reflect(-lightDir, normal);
-        vec3 viewDir = normalize(-vertPos);
+void main(void)
+{
+    // Get surface normal in eye coordinates
+    vec3 eyeNormal = normalize(normalMatrix * gl_Normal); 
 
-        float lambertian = max(dot(lightDir,normal), 0.0);
-        float specular = 0.0;
+    // Get vertex position in eye coordinates
+    vec4 vPosition4 = mvMatrix * gl_Vertex; 
+    vec3 vPosition3 = vPosition4.xyz / vPosition4.w;
+    
+    // Get vector to light source
+    vec3 vLightDir = normalize(lightPosition - vPosition3);
+    
+	// Dot product gives the diffuse intensity
+	float diff = max(0.0, dot(eyeNormal, vLightDir)); 
+	
+	// Multiply intensity by diffuse color, force alpha to 1.0
+	varyingColor = diff * diffuseColor; 
 
-        if(lambertian > 0.0) {
-        float specAngle = max(dot(reflectDir, viewDir), 0.0);
-        specular = pow(specAngle, 4.0);
-        }
+	// Add in ambient light
+	varyingColor += ambientColor;
+	
+	// Specular light
+	vec3 reflection = normalize(reflect(-vLightDir, eyeNormal));
+	float spec = max(0.0, dot(eyeNormal, reflection));
+	if (diff != 0.0) {
+		float fSpec = pow(spec, 128.0);
+		varyingColor.rgb += vec3(fSpec, fSpec, fSpec);
+	}
+	
+    // Transform the geometry
+    gl_Position = mvpMatrix * gl_Vertex; 
+}
 
-        color = vec4(ambientColor +
-                      lambertian*diffuseColor +
-                      specular*specularColor, 1.0);
+'''
 
-    }
-    // gouraud
-    else if(shading == 1) {
-        color = vertexColor;
-    }
-    // phong
-    else {  
-        vec3 normal = normalize(normalInterp);
-        vec3 lightDir = normalize(lightPos - vertPos);
-        vec3 reflectDir = reflect(-lightDir, normal);
-        vec3 viewDir = normalize(-vertPos);
+fragment_shader_gouraud = '''
+#version 140
 
-        //lightDir*normal
-        float lambertian = max(dot(lightDir,normal), 0.0);
-        float specular = 0.0;
+varying vec4 varyingColor;
+out vec4 color;
 
-        if(lambertian > 0.0) {
-        float specAngle = max(dot(reflectDir, viewDir), 0.0);
-        specular = pow(specAngle, 4.0);
-        }
-        color = vec4(ambientColor +
-                        lambertian*diffuseColor +
-                        specular*specularColor, 1.0);
+void main(void) 
+{
+	color = varyingColor;
+}
+'''
 
+vertex_shader_phong = '''
+#version 140
 
+uniform mat4 mvpMatrix; 
+uniform mat4 mvMatrix; 
+uniform mat3 normalMatrix; 
+uniform vec3 lightPosition; 
+
+varying vec3 varyingVertex;
+varying vec3 varyingLightDir;
+varying vec3 varyingNormal;
+
+out vec4 color;
+
+void main(void)
+{
+    // Get surface normal in eye coordinates
+    varyingNormal = normalMatrix * gl_Normal; 
+
+    // Get vertex position in eye coordinates
+    vec4 vPosition4 = mvMatrix * gl_Vertex; 
+    varyingVertex = vPosition4.xyz / vPosition4.w;
+    
+    // Get vector to light source
+    varyingLightDir = normalize(lightPosition - varyingVertex);
+    
+    // Transform the geometry
+    gl_Position = mvpMatrix * gl_Vertex; 
+}
+
+'''
+
+fragment_shader_phong = '''
+#version 140
+
+uniform vec4 ambientColor;
+uniform vec4 diffuseColor;
+uniform vec4 specularColor; 
+
+varying vec3 varyingVertex;
+varying vec3 varyingLightDir;
+varying vec3 varyingNormal;
+
+out vec4 color;
+
+float intensity(vec3 u, vec3 v) {
+	return  max(0.0, dot(normalize(u), normalize(v)));
+}
+
+void main(void) 
+{
+    // Eye position is view direction
+    vec3 eye = normalize(-varyingVertex);
+
+    // Direction of reflected light
+    vec3 reflected = normalize(reflect(-varyingLightDir, varyingNormal));
+
+    // Ambient color
+    vec4 ambientC  = gl_LightSource[0].ambient * ambientColor;
+    color = ambientC;
+
+    // Dot product between normal and light direction gives diffuse intensity
+    float dI = intensity(varyingNormal,varyingLightDir);
+    vec4 diffuseC  = dI * gl_LightSource[0].diffuse * diffuseColor;
+    color += diffuseC;
+
+    // If diffuse light is zero, don't even bother with the power function
+    if(dI != 0.0) {
+        // Dot product between reflected light direction and view direction gives specular intensity
+        float shininess = 128.0; 
+        float sI = pow(intensity(reflected, eye), shininess);
+        vec4 specularC = sI * gl_LightSource[0].specular * specularColor;
+        color  += specularC;
     }
 }
 '''
 
-  
-class Shape:
-    def __init__(self, shape, shader):
-        self.shape = shape
-        self.shader = shader
+myVBO = None
+data = []
+wireframe = False
+startP = 0, 0
+WIDTH, HEIGHT = 500, 500
+angle = 0
+axis = [1, 0, 0]
+actOrient = identity(4, float)
+doRotation, doScale = False, False
+scaleFactor = 1.0
+program,  vertexShader,  fragmentShader = None, None, None
+program2, vertexShader2, fragmentShader2 = None, None, None
+program3, vertexShader3, fragmentShader3 = None, None, None
+shader = 1
+projectionMatrix = identity(4)
 
-    def render(self):
-        qobj = gluNewQuadric()
-        gluQuadricNormals(qobj, GLU_SMOOTH)
-        gluQuadricOrientation(qobj, GLU_OUTSIDE)
-        vn = glGetAttribLocation(self.shader, 'normal')
-        glVertexAttrib3f(vn, 0.0, 0.0, 0.0)
-        glDisableVertexAttribArray(vn)
-
-        if self.shape == 'sphere':
-            gluSphere(qobj, 1, 50, 50)
-        elif self.shape == 'cylinder':
-            gluCylinder(qobj, 1, 1, 1, 50, 50)
-        else:
-            glutSolidTeapot(50.0)
-
-
-class Renderer:
-    def __init__(self):
-        self.t = 0.0
-        self.modeVal = 1
-        self.shape = 0
-
-        self.progID = 0
-        self.vertexLoc = -1
-        self.texCoordLoc = -1
-        self.normalLoc = -1
-        self.projectionLoc = -1
-        self.modelviewLoc = -1
-        self.normalMatrixLoc = -1
-        self.modeLoc = -1
-        self.projection = np.zeros((16,), dtype="float32")  # projection matrix
-        self.modelview = np.zeros((16,), dtype="float32")   # modelview matrix
-
-    def start(self, s):
-        glEnable(GL_DEPTH_TEST)
-        self.setupShaders()
-        self.display(s)
-        self.shape = Shape('sphere', self.progID)
-        self.shape.render()
-
-    def setupShaders(self):
-        # compile the shader
-
-        self.progID = glCreateProgram()
-        glAttachShader(self.progID, shaders.compileShader(vertex_shader, GL_VERTEX_SHADER))
-        glAttachShader(self.progID, shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
-
-        # "color" is a user-provided OUT variable
-        # of the fragment shader.
-        # Its output is bound to the first color buffer
-        # in the framebuffer
-        glBindFragDataLocation(self.progID, 0, "color")
-
-        # link the program
-        glLinkProgram(self.progID)
-
-        # retrieve the location of the IN variables of the vertex shaders
-        self.vertexLoc = glGetAttribLocation(self.progID,"position")
-        self.texCoordLoc = glGetAttribLocation(self.progID,"TexCoord")
-        self.normalLoc = glGetAttribLocation(self.progID, "normal")
-
-        # retrieve the location of the UNIFORM variables of the shader
-        self.projectionLoc = glGetUniformLocation(self.progID, "projection")
-        self.modelviewLoc = glGetUniformLocation(self.progID, "modelview")
-        self.normalMatrixLoc = glGetUniformLocation(self.progID, "normalMat")
-        self.modeLoc = glGetUniformLocation(self.progID, "mode")
-    
-    def resize(self, w, h):
-        glViewport(0, 0, w, h)
-
-        # self function replaces gluPerspective
-        self.mat4Perspective(self.projection, 45.0, w/h, 0.5, 4.0)
-        # mat4Print(projection);
-  
-
-    def display(self, s):
-        glClearColor(0.8, 1.0, 0.7, 1.0)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-
-        rad = PI / 180.0 * self.t
-    
-        self.mat4LookAt(self.modelview,
-               1.5*float(math.cos(rad)), 1.5*float(math.sin(rad)), 1.5, # eye
-               0.0, 0.0, 0.0, # look at
-               0.0, 0.0, 1.0) # up
+#
+# Set up OpenGL state.  This does everything so when we draw we only need to
+# actually draw the sphape, and OpenGL remembers all of our other settings.
+#
 
 
-        modelviewInv = np.zeros((16,), dtype="float32")
-        normalmatrix = np.zeros((16,), dtype="float32")
-        self.mat4Invert(self.modelview, modelviewInv)
-        self.mat4Transpose(modelviewInv, normalmatrix)
-        
-        glUseProgram(self.progID)
+def initGL(width, height):
+    # Set background color
+    glClearColor(0.8, 1.0, 0.7, 0.0)
 
-        # load the current projection and modelview matrix into the
-        # corresponding UNIFORM variables of the shader
-        glUniformMatrix4fv(self.projectionLoc, 1, GL_FALSE, self.projection)
-        glUniformMatrix4fv(self.modelviewLoc, 1, GL_FALSE, self.modelview)
-        if(self.normalMatrixLoc != -1):
-            glUniformMatrix4fv(self.normalMatrixLoc, 1, GL_FALSE, normalmatrix)
-        if(self.modeLoc != -1): 
-            glUniform1f(self.modeLoc, self.modeVal)
-   
+    # Set perspective projection
+    projectionMatrix = perspectiveMatrix(45.0, 1., 0.1, 100.0)
+    glEnable(GL_DEPTH_TEST)
+    glEnable(GL_NORMALIZE)
 
+    if not glUseProgram:
+        print("Missing Shader Objects!")
+        sys.exit(1)
 
-    # ----- the following functions are some matrix and vector helpers --------
-    def vec3Dot(self, a, b):
-        return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
+    global program
+    program = compileProgram(
+        compileShader(vertex_shader_flat, GL_VERTEX_SHADER),
+        compileShader(fragment_shader_flat, GL_FRAGMENT_SHADER),)
 
-    def vec3Cross(self, a, b, res):
-        res[0] = a[1] * b[2]  -  b[1] * a[2]
-        res[1] = a[2] * b[0]  -  b[2] * a[0]
-        res[2] = a[0] * b[1]  -  b[0] * a[1]
+    global program2
+    program2 = compileProgram(
+        compileShader(vertex_shader_gouraud, GL_VERTEX_SHADER),
+        compileShader(fragment_shader_gouraud, GL_FRAGMENT_SHADER),)
 
+    global program3
+    program3 = compileProgram(
+        compileShader(vertex_shader_phong, GL_VERTEX_SHADER),
+        compileShader(fragment_shader_phong, GL_FRAGMENT_SHADER),)
 
-    def vec3Normalize(self, a):
-        mag = math.sqrt(a[0] * a[0]  +  a[1] * a[1]  +  a[2] * a[2])
-        a[0] /= mag; a[1] /= mag; a[2] /= mag
-  
-
-    def mat4Identity(self, a):
-        for i in range(16):
-            a[i] = 0.0
-        for i in range(4):
-            a[i + i * 4] = 1.0
-    
-    def mat4Multiply(a, b, res):
-        for i in range(4):
-            for j in range(4): 
-                res[j*4 + i] = 0.0
-                for k in range(4): 
-                    res[j*4 + i] += a[k*4 + i] * b[j*4 + k]
-
-    
-    def mat4Perspective(self, a, fov, aspect, zNear, zFar):
-        f = 1.0 / (math.tan (fov/2.0 * (PI / 180.0)))
-        self.mat4Identity(a)
-        a[0] = f / aspect
-        a[1 * 4 + 1] = f
-        a[2 * 4 + 2] = (zFar + zNear)  / (zNear - zFar)
-        a[3 * 4 + 2] = (2.0 * zFar * zNear) / (zNear - zFar)
-        a[2 * 4 + 3] = -1.0
-        a[3 * 4 + 3] = 0.0
-    
-
-    def mat4LookAt(self,viewMatrix,
-                    eyeX, eyeY, eyeZ,
-                    centerX, centerY, centerZ,
-                    upX, upY, upZ):
-
-        dr = np.zeros((3,), dtype="float32")
-        right = np.zeros((3,), dtype="float32")
-        up = np.zeros((3,), dtype="float32")
-        eye = np.zeros((3,), dtype="float32")
-
-        up[0]=upX
-        up[1]=upY 
-        up[2]=upZ
-
-        eye[0]=eyeX
-        eye[1]=eyeY
-        eye[2]=eyeZ
-
-        dr[0]=centerX-eyeX
-        dr[1]=centerY-eyeY
-        dr[2]=centerZ-eyeZ
-
-        self.vec3Normalize(dr)
-        self.vec3Cross(dr,up,right)
-        self.vec3Normalize(right)
-        self.vec3Cross(right,dr,up)
-        self.vec3Normalize(up)
-
-        # first row
-        viewMatrix[0]  = right[0]
-        viewMatrix[4]  = right[1]
-        viewMatrix[8]  = right[2]
-        viewMatrix[12] = -self.vec3Dot(right, eye)
-
-        # second row
-        viewMatrix[1]  = up[0]
-        viewMatrix[5]  = up[1]
-        viewMatrix[9]  = up[2]
-        viewMatrix[13] = -self.vec3Dot(up, eye)
-        
-        # third row
-        viewMatrix[2]  = -dr[0]
-        viewMatrix[6]  = -dr[1]
-        viewMatrix[10] = -dr[2]
-        viewMatrix[14] =  self.vec3Dot(dr, eye)
-
-        # forth row
-        viewMatrix[3]  = 0.0
-        viewMatrix[7]  = 0.0
-        viewMatrix[11] = 0.0
-        viewMatrix[15] = 1.0
-    
-
-    def mat4Print(self, a):
-        # opengl uses column major order
-        for i in range(4):
-            for j in range(4): 
-                print(a[j * 4 + i] + " ")
-            print("\n")
-        
-
-    def mat4Transpose(self,a, transposed):
-        t = 0
-        for i in range(4):
-            for j in range(4): 
-                transposed[t] = a[j * 4 + i]
-                t +=1
-        
-
-    def mat4Invert(self,m, inverse):
-        inv = np.zeros((16,), dtype="float32")
-        inv[0] = m[5]*m[10]*m[15]-m[5]*m[11]*m[14]-m[9]*m[6]*m[15]+m[9]*m[7]*m[14]+m[13]*m[6]*m[11]-m[13]*m[7]*m[10]
-        inv[4] = -m[4]*m[10]*m[15]+m[4]*m[11]*m[14]+m[8]*m[6]*m[15]-m[8]*m[7]*m[14]-m[12]*m[6]*m[11]+m[12]*m[7]*m[10]
-        inv[8] = m[4]*m[9]*m[15]-m[4]*m[11]*m[13]-m[8]*m[5]*m[15]+m[8]*m[7]*m[13]+m[12]*m[5]*m[11]-m[12]*m[7]*m[9]
-        inv[12]= -m[4]*m[9]*m[14]+m[4]*m[10]*m[13]+m[8]*m[5]*m[14]-m[8]*m[6]*m[13]-m[12]*m[5]*m[10]+m[12]*m[6]*m[9]
-        inv[1] = -m[1]*m[10]*m[15]+m[1]*m[11]*m[14]+m[9]*m[2]*m[15]-m[9]*m[3]*m[14]-m[13]*m[2]*m[11]+m[13]*m[3]*m[10]
-        inv[5] = m[0]*m[10]*m[15]-m[0]*m[11]*m[14]-m[8]*m[2]*m[15]+m[8]*m[3]*m[14]+m[12]*m[2]*m[11]-m[12]*m[3]*m[10]
-        inv[9] = -m[0]*m[9]*m[15]+m[0]*m[11]*m[13]+m[8]*m[1]*m[15]-m[8]*m[3]*m[13]-m[12]*m[1]*m[11]+m[12]*m[3]*m[9]
-        inv[13]= m[0]*m[9]*m[14]-m[0]*m[10]*m[13]-m[8]*m[1]*m[14]+m[8]*m[2]*m[13]+m[12]*m[1]*m[10]-m[12]*m[2]*m[9]
-        inv[2] = m[1]*m[6]*m[15]-m[1]*m[7]*m[14]-m[5]*m[2]*m[15]+m[5]*m[3]*m[14]+m[13]*m[2]*m[7]-m[13]*m[3]*m[6]
-        inv[6] = -m[0]*m[6]*m[15]+m[0]*m[7]*m[14]+m[4]*m[2]*m[15]-m[4]*m[3]*m[14]-m[12]*m[2]*m[7]+m[12]*m[3]*m[6]
-        inv[10]= m[0]*m[5]*m[15]-m[0]*m[7]*m[13]-m[4]*m[1]*m[15]+m[4]*m[3]*m[13]+m[12]*m[1]*m[7]-m[12]*m[3]*m[5]
-        inv[14]= -m[0]*m[5]*m[14]+m[0]*m[6]*m[13]+m[4]*m[1]*m[14]-m[4]*m[2]*m[13]-m[12]*m[1]*m[6]+m[12]*m[2]*m[5]
-        inv[3] = -m[1]*m[6]*m[11]+m[1]*m[7]*m[10]+m[5]*m[2]*m[11]-m[5]*m[3]*m[10]-m[9]*m[2]*m[7]+m[9]*m[3]*m[6]
-        inv[7] = m[0]*m[6]*m[11]-m[0]*m[7]*m[10]-m[4]*m[2]*m[11]+m[4]*m[3]*m[10]+m[8]*m[2]*m[7]-m[8]*m[3]*m[6]
-        inv[11]= -m[0]*m[5]*m[11]+m[0]*m[7]*m[9]+m[4]*m[1]*m[11]-m[4]*m[3]*m[9]-m[8]*m[1]*m[7]+m[8]*m[3]*m[5]
-        inv[15]= m[0]*m[5]*m[10]-m[0]*m[6]*m[9]-m[4]*m[1]*m[10]+m[4]*m[2]*m[9]+m[8]*m[1]*m[6]-m[8]*m[2]*m[5]
-
-        det = m[0]*inv[0]+m[1]*inv[4]+m[2]*inv[8]+m[3]*inv[12]
-        if (det == 0):
-             return False
-        det = 1.0 / det
-        for i in range(16):
-            inverse[i] = inv[i] * det
-        return True
+    # initialize the "quadric" used by GLU to render high-level objects.
+    global quad
+    quad = gluNewQuadric()
+    gluQuadricOrientation(quad, GLU_OUTSIDE)
 
 
+def rotationMatrix(angle, axis):
+	c, mc, s = cos(angle), 1-cos(angle), sin(angle)
+	x, y, z = array(axis)/sqrt(dot(array(axis), array(axis)))
+	r = matrix([[x*x*mc+c, 	 x*y*mc-z*s, x*z*mc+y*s, 0],
+             [x*y*mc+z*s, y*y*mc+c,   y*z*mc-x*s, 0],
+             [x*z*mc-y*s, y*z*mc+x*s, z*z*mc+c, 0],
+             [0, 0, 0, 1]])
+	return r
 
-renderer = Renderer()
 
-def glutResize(w, h):
-  renderer.resize(w,h)
+def scaleMatrix(sx, sy, sz):
+    s = matrix([[sx, 0,  0, 0],
+                [0, sy,  0, 0],
+                [0,  0, sz, 0],
+                [0,  0,  0, 1]])
+    return s
 
 
-def glutDisplay():
-  renderer.display('flat')
-  glutSwapBuffers()
-  glutReportErrors()
+def translationMatrix(tx, ty, tz):
+    t = matrix([[1,  0,  0, tx],
+                [0,  1,  0, ty],
+                [0,  0,  1, tz],
+                [0,  0,  0,  1]])
+    return t
+
+
+def lookAtMatrix(ex, ey, ez, cx, cy, cz, ux, uy, uz):
+	e = array([ex, ey, ez])  # eye position
+	c = array([cx, cy, cz])  # center
+	up = array([ux, uy, uz])  # up vector
+	# normalize up vector
+	lup = sqrt(dot(up, up))
+	up = up / lup
+	# determine view direction
+	f = c - e
+	lf = sqrt(dot(f, f))
+	f = f / lf
+	# determine s
+	s = cross(f, up)
+	ls = sqrt(dot(s, s))
+	s = s / ls
+	# determine u
+	u = cross(s, f)
+	# create lookAt matrix
+	l = matrix([[s[0],  s[1],  s[2], -dot(s, e)],
+             [u[0],  u[1],  u[2], -dot(u, e)],
+             [-f[0], -f[1], -f[2],  dot(f, e)],
+             [0,     0,     0,         1]])
+	return l
+
+
+def perspectiveMatrix(fovy, aspect, zNear, zFar):
+	f = 1.0 / tan(fovy/2.0)  # cotan(fovy/2)
+	aspect = float(aspect)
+	zNear = float(zNear)
+	zFar = float(zFar)
+	p = matrix([[f/aspect, 0,                         0,                           0],
+             [0, f,                         0,                           0],
+             [0, 0, (zFar+zNear)/(zNear-zFar), (2*zFar*zNear)/(zNear-zFar)],
+             [0, 0,                        -1,                           0]])
+	return p
+
+
+def sendVec3(shaderProgram, varName, value):
+	# determine location of uniform variable varName
+	varLocation = glGetUniformLocation(shaderProgram, varName)
+	# pass value to shader
+	glUniform3f(varLocation, *value)
+
+
+def sendVec4(shaderProgram, varName, value):
+	# determine location of uniform variable varName
+	varLocation = glGetUniformLocation(shaderProgram, varName)
+	# pass value to shader
+	glUniform4f(varLocation, *value)
+	#glUniform4f(varLocation, *array(value))
+
+
+def sendMatrix3(shaderProgram, varName, matrix):
+	# determine location of uniform variable varName
+	varLocation = glGetUniformLocation(shaderProgram, varName)
+	# pass value to shader
+	#glUniformMatrix3fv(varLocation, 1, GL_TRUE, matrix.tostring())
+	glUniformMatrix3fv(varLocation, 1, GL_TRUE, matrix.tolist())
+
+
+def sendMatrix4(shaderProgram, varName, matrix):
+	# determine location of uniform variable varName
+	varLocation = glGetUniformLocation(shaderProgram, varName)
+	# pass value to shader
+	#glUniformMatrix4fv(varLocation, 1, GL_TRUE, matrix.tostring())
+	glUniformMatrix4fv(varLocation, 1, GL_TRUE, matrix.tolist())
+
+
+def display():
+	# Clear framebuffer
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+	# modelview matrix
+	mvMatrix = lookAtMatrix(0, 0, 2.5, 0, 0, 0, 0, 1, 0)
+	mvMatrix *= (rotationMatrix(angle, axis) * actOrient)
+	mvMatrix *= scaleMatrix(scale, scale, scale)
+	mvMatrix *= translationMatrix(-center[0], -center[1], -center[2])
+
+	# normal matrix
+	normalMatrix = linalg.inv(mvMatrix[0:3, 0:3]).T
+
+	# modelview_projection matrix
+	mvpMatrix = projectionMatrix * mvMatrix
+
+    # set lighting
+	lightPosition = [0, 0, 1]
+	diffuseColor = [180/255., 100/255., 60/255., 1]
+	ambientColor = [45/255., 25/255., 15/255., 1]
+	specularColor = [90/255., 50/255., 30/255., 1]
+
+    # switch between different shaders
+	if shader == 0:
+		glUseProgram(program)
+		sendMatrix4(program, "mvMatrix", mvMatrix)
+		sendMatrix4(program, "mvpMatrix", mvpMatrix)
+		sendMatrix3(program, "normalMatrix", normalMatrix)
+		sendVec4(program, "diffuseColor", diffuseColor)
+		sendVec4(program, "ambientColor", ambientColor)
+		sendVec4(program, "specularColor", specularColor)
+		sendVec3(program, "lightPosition", lightPosition)
+	elif shader == 1:
+		glUseProgram(program2)
+		sendMatrix4(program2, "mvMatrix", mvMatrix)
+		sendMatrix4(program2, "mvpMatrix", mvpMatrix)
+		sendMatrix3(program2, "normalMatrix", normalMatrix)
+		sendVec4(program2, "diffuseColor", diffuseColor)
+		sendVec4(program2, "ambientColor", ambientColor)
+		sendVec4(program2, "specularColor", specularColor)
+		sendVec3(program2, "lightPosition", lightPosition)
+	elif shader == 2:
+		glUseProgram(program3)
+		sendMatrix4(program3, "mvMatrix", mvMatrix)
+		sendMatrix4(program3, "mvpMatrix", mvpMatrix)
+		sendMatrix3(program3, "normalMatrix", normalMatrix)
+		sendVec4(program3, "diffuseColor", diffuseColor)
+		sendVec4(program3, "ambientColor", ambientColor)
+		sendVec4(program3, "specularColor", specularColor)
+		sendVec3(program3, "lightPosition", lightPosition)
+
+    # render object
+	glEnableClientState(GL_VERTEX_ARRAY)
+	glEnableClientState(GL_NORMAL_ARRAY)
+	myVBO.bind()
+	glVertexPointer(3, GL_FLOAT, 24, myVBO)
+	glNormalPointer(GL_FLOAT, 24, myVBO+12)
+	glDrawArrays(GL_TRIANGLES, 0, len(data))
+	myVBO.unbind()
+	glDisableClientState(GL_VERTEX_ARRAY)
+	glDisableClientState(GL_NORMAL_ARRAY)
+
+	glutSwapBuffers()
+
+
+def projectOnSphere(x, y, r):
+	x, y = x-WIDTH/2.0, HEIGHT/2.0-y
+	a = min(r*r, x**2 + y**2)
+	z = sqrt(r*r - a)
+	l = sqrt(x**2 + y**2 + z**2)
+	return x/l, y/l, z/l
+
+
+def mousebuttonpressed(button, state, x, y):
+	global startP, actOrient, angle, doRotation, doScale
+	r = min(WIDTH, HEIGHT)/2.0
+	if button == GLUT_LEFT_BUTTON:
+		if state == GLUT_DOWN:
+			doRotation = True
+			startP = projectOnSphere(x, y, r)
+		if state == GLUT_UP:
+			doRotation = False
+			actOrient = rotationMatrix(angle, axis) * actOrient
+			angle = 0
+	if button == GLUT_RIGHT_BUTTON:
+		if state == GLUT_DOWN:
+			doScale = True
+			startP = y
+		if state == GLUT_UP:
+			doScale = False
+
+
+def mousemoved(x, y):
+	global angle, axis, scaleFactor
+	if doRotation:
+		r = min(WIDTH, HEIGHT)/2.0
+		moveP = projectOnSphere(x, y, r)
+		angle = acos(dot(startP, moveP))
+		axis = cross(startP, moveP)
+	if doScale:
+		d = 0.1*(startP - y)/float(HEIGHT)
+		scaleFactor += d
+	glutPostRedisplay()
 
 
 def main():
-    if not glfw.init():
-        return
-    window = glfw.create_window(1280, 760, 'Shadings', None, None)
-    if not window:
-        glfw.terminate()
-        return
+	# Initialize GLUT
+	glutInit(sys.argv)
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB)
+	glutInitWindowSize(WIDTH, HEIGHT)
+	glutCreateWindow("Simple OBJ-Viewer using Shader")
+	# Register display callback function
+	glutDisplayFunc(display)
+	glutKeyboardFunc(keypressed)
+	glutMouseFunc(mousebuttonpressed)
+	glutMotionFunc(mousemoved)
+	glutReshapeFunc(resizeViewport)
+	# Initialize OpenGL Context
+	initGL(WIDTH, HEIGHT)
+	# Start GLUT mainloop
+	glutMainLoop()
 
-    glfw.make_context_current(window)
+
+def keypressed(key, x, y):
+	global wireframe, shader
+	if key == 'q' or key == 'Q':
+		sys.exit()
+	if key == 'w':
+		wireframe ^= True
+		if wireframe:
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+		else:
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+	if key == 's':
+		shader = (shader + 1) % 3
+		print(shader)
+	glutPostRedisplay()
+
+
+def resizeViewport(width, height):
+	global WIDTH, HEIGHT
+	# Prevent division by zero
+	if height == 0:
+		height = 1
+	WIDTH, HEIGHT = width, height
+	# Reset current viewport
+	glViewport(0, 0, width, height)
+	global projectionMatrix
+	projectionMatrix = perspectiveMatrix(45.0, float(width)/height, 0.1, 100.0)
+	glutPostRedisplay()
+
+
+# run the script
+if __name__ == "__main__":
+    # load data
+    vertices, normals, faces = [], [], []
+    f = open('teste.obj', 'r')
+    for line in f:
+        sl = line.split()
+        if len(sl) > 0:
+            if sl[0] == 'v':
+                vertices.append(list(map(float, sl[1:])))
+            if sl[0] == 'vn':
+                normals.append(list(map(float, sl[1:])))
+            if sl[0] == 'f':
+                vv = [v.split("/") for v in sl[1:]]
+                faces.append(vv)
+
     
-    glClearColor(0.8, 1.0, 0.7, 1.0)
-    glEnable(GL_DEPTH_TEST)
-    glCullFace(GL_BACK)
-    
-    renderer = Renderer()
+    # bounding box
+    bb = [map(min, zip(*vertices)), map(max, zip(*vertices))]
+	# bounding box center
+    center = [(x[1]+x[0])/2.0 for x in zip(*bb)]
+	# scale factor
+    # scale = 2.0/max([(x[1]-x[0]) for x in zip(*bb)])
+    scale = 1
 
-    while not glfw.window_should_close(window):
-        glfw.poll_events()
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        renderer.start('flat')
-        glfw.swap_buffers(window)
-    glfw.terminate()
+	# set data
+    data = []
+    for face in faces:
+        for vertex in face:
+            vnr = int(vertex[0])-1
+            nnr = int(vertex[2])-1
+            data.append(vertices[vnr]+normals[nnr])
 
-    # glutInit()
-    # glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
-    # glutInitWindowSize(800, 800)
-    # glutInitWindowPosition(350, 200)
-
-    # glutCreateWindow("FlatShading")
-    # glutDisplayFunc(glutDisplay)
-
-    # glutIdleFunc(glutDisplay)   
-    # glutReshapeFunc(glutResize) 
-    # renderer = Renderer()
-    # renderer.start('flat')
-
-    # glutMainLoop()
-
-if __name__ == '__main__':
+    myVBO = vbo.VBO(array(data, 'f'))
     main()
