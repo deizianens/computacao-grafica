@@ -21,9 +21,11 @@ in vec3 normal;
 in vec2 TexCoord;
 
 uniform mat4 projection, modelview, normalMat;
+uniform int mode;
 
 out vec3 normalInterp;
 out vec3 vertPos;
+
 out vec4 vertexColor; //only for gouraud
 
 const vec3 lightPos = vec3(2.0, 1.0, 1.0);
@@ -31,21 +33,16 @@ const vec3 ambientColor = vec3(0.0, 0.1, 0.1);
 const vec3 diffuseColor = vec3(0.0, 0.6, 0.6);
 const vec3 specularColor = vec3(1.0, 1.0, 1.0);
 
-uniform float Ka;   // Ambient reflection coefficient
-uniform float Kd;   // Diffuse reflection coefficient
-uniform float Ks;   // Specular reflection coefficient
-uniform float shininessVal; // Shininess
-
 
 void main(){
     gl_Position = projection * modelview * vec4(position, 1.0);
-
-    normalInterp = vec3(normalMat * vec4(normal, 0.0));
 
     // ------------ only for gouraud -----------------
     vec3 normal = vec3(normalMat * vec4(normal, 0.0));
     vec4 vertPos4 = modelview * vec4(position, 1.0);
     vertPos = vec3(vertPos4) / vertPos4.w;
+    normalInterp = vec3(normalMat * vec4(normal, 0.0));
+
     vec3 lightDir = normalize(lightPos - vertPos);
     vec3 reflectDir = reflect(-lightDir, normal);
     vec3 viewDir = normalize(-vertPos);
@@ -79,11 +76,6 @@ const vec3 diffuseColor = vec3(0.0, 0.6, 0.6);
 const vec3 specularColor = vec3(1.0, 1.0, 1.0);
 
 uniform int shading = 2;
-
-uniform float Ka;   // Ambient reflection coefficient
-uniform float Kd;   // Diffuse reflection coefficient
-uniform float Ks;   // Specular reflection coefficient
-uniform float shininessVal; // Shininess 
 
 out vec4 color;
 
@@ -146,9 +138,9 @@ class Shape:
         qobj = gluNewQuadric()
         gluQuadricNormals(qobj, GLU_SMOOTH)
         gluQuadricOrientation(qobj, GLU_OUTSIDE)
-        # vn = glGetAttribLocation(self.shader, 'normal')
-        # glVertexAttrib3f(vn, 0.0, 0.0, 0.0)
-        # glDisableVertexAttribArray(vn)
+        vn = glGetAttribLocation(self.shader, 'normal')
+        glVertexAttrib3f(vn, 0.0, 0.0, 0.0)
+        glDisableVertexAttribArray(vn)
 
         if self.shape == 'sphere':
             gluSphere(qobj, 1, 50, 50)
@@ -161,43 +153,25 @@ class Shape:
 class Renderer:
     def __init__(self):
         self.t = 0.0
-        self.lightVec = np.array([0, 0, 0], dtype="float32")
-        self.clearColor = [0.0, 0.4, 0.7]
-        self.attenuation = 0.01
-        self.shininess = 80.0
-        self.kaVal = 1.0
-        self.kdVal = 1.0
-        self.ksVal = 1.0
-
-        self.progID = 0
+        self.modeVal = 1
         self.shape = 0
 
-        self.vertexLoc = 0
-        self.texCoordLoc = 0
-        self.normalLoc = 0
-        self.projectionLoc = 0
-        self.modelviewLoc = 0
-        self.normalMatrixLoc = 0
-        self.modeLoc = 0
-        self.kaLoc = 0
-        self.kdLoc = 0
-        self.ksLoc = 0
-        self.attenuationLoc = 0
-        self.shininessLoc = 0
-        self.lightPosLoc = 0
-        self.lightVecLoc = 0
-        self.ambientColorLoc = 0
-        self.diffuseColorLoc = 0
-        self.specularColorLoc = 0
+        self.progID = 0
+        self.vertexLoc = -1
+        self.texCoordLoc = -1
+        self.normalLoc = -1
+        self.projectionLoc = -1
+        self.modelviewLoc = -1
+        self.normalMatrixLoc = -1
+        self.modeLoc = -1
         self.projection = np.zeros((16,), dtype="float32")  # projection matrix
         self.modelview = np.zeros((16,), dtype="float32")   # modelview matrix
 
     def start(self, s):
         glEnable(GL_DEPTH_TEST)
         self.setupShaders()
-        self.resize(500, 500)
         self.display(s)
-        self.shape = Shape('teapot', self.progID)
+        self.shape = Shape('sphere', self.progID)
         self.shape.render()
 
     def setupShaders(self):
@@ -225,16 +199,7 @@ class Renderer:
         self.projectionLoc = glGetUniformLocation(self.progID, "projection")
         self.modelviewLoc = glGetUniformLocation(self.progID, "modelview")
         self.normalMatrixLoc = glGetUniformLocation(self.progID, "normalMat")
-        # lightPosLoc = glGetUniformLocation(progID, "lightPos")
-        # ambientColorLoc = glGetUniformLocation(progID, "ambientColor")
-        # diffuseColorLoc = glGetUniformLocation(progID, "diffuseColor")
-        # specularColorLoc = glGetUniformLocation(progID, "specularColor")
-        self.lightVecLoc = glGetUniformLocation(self.progID, "lightVec")
-        self.shininessLoc = glGetUniformLocation(self.progID, "shininessVal")
-        self.attenuationLoc = glGetUniformLocation(self.progID, "attenuationVal")
-        self.kaLoc = glGetUniformLocation(self.progID, "Ka")
-        self.kdLoc = glGetUniformLocation(self.progID, "Kd")
-        self.ksLoc = glGetUniformLocation(self.progID, "Ks")
+        self.modeLoc = glGetUniformLocation(self.progID, "mode")
     
     def resize(self, w, h):
         glViewport(0, 0, w, h)
@@ -263,33 +228,15 @@ class Renderer:
         
         glUseProgram(self.progID)
 
-        # shading = glGetUniformLocation(self.progID, 'shading')
-        # if s == 'flat':
-        #     glUniform1i(shading, 0)
-        # elif s == 'gouraud':
-        #     glUniform1i(shading, 1)
-        # else:
-        #     glUniform1i(shading, 2)
-
         # load the current projection and modelview matrix into the
         # corresponding UNIFORM variables of the shader
         glUniformMatrix4fv(self.projectionLoc, 1, GL_FALSE, self.projection)
         glUniformMatrix4fv(self.modelviewLoc, 1, GL_FALSE, self.modelview)
         if(self.normalMatrixLoc != -1):
             glUniformMatrix4fv(self.normalMatrixLoc, 1, GL_FALSE, normalmatrix)
-        if(self.kaLoc != -1): 
-            glUniform1f(self.kaLoc, self.kaVal)
-        if(self.kdLoc != -1): 
-            glUniform1f(self.kdLoc, self.kdVal)
-        if(self.ksLoc != -1):
-            glUniform1f(self.ksLoc, self.ksVal)
-        if(self.attenuationLoc != -1):
-            glUniform1f(self.attenuationLoc, self.attenuation)
-        if(self.shininessLoc != -1):
-            glUniform1f(self.shininessLoc, self.shininess)
-        if(self.lightVecLoc != -1): 
-            glUniform3fv(self.lightVecLoc, self.lightVec)
-       
+        if(self.modeLoc != -1): 
+            glUniform1f(self.modeLoc, self.modeVal)
+   
 
 
     # ----- the following functions are some matrix and vector helpers --------
@@ -432,6 +379,10 @@ class Renderer:
 
 renderer = Renderer()
 
+def glutResize(w, h):
+  renderer.resize(w,h)
+
+
 def glutDisplay():
   renderer.display('flat')
   glutSwapBuffers()
@@ -439,45 +390,42 @@ def glutDisplay():
 
 
 def main():
-    # if not glfw.init():
-    #     return
-    # window = glfw.create_window(1280, 760, 'Shadings', None, None)
-    # if not window:
-    #     glfw.terminate()
-    #     return
+    if not glfw.init():
+        return
+    window = glfw.create_window(1280, 760, 'Shadings', None, None)
+    if not window:
+        glfw.terminate()
+        return
 
-    # glfw.make_context_current(window)
+    glfw.make_context_current(window)
     
-    # glClearColor(0.8, 1.0, 0.7, 1.0)
-    # glEnable(GL_DEPTH_TEST)
-    # glCullFace(GL_BACK)
-    
-    # renderer = Renderer()
-
-    # while not glfw.window_should_close(window):
-    #     glfw.poll_events()
-    #     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-    #     renderer.start('flat')
-    #     glfw.swap_buffers(window)
-    # glfw.terminate()
-
-    glutInit()
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
-    glutInitWindowSize(800, 800)
-    glutInitWindowPosition(350, 200)
-
-    glutCreateWindow("FlatShading")
-    glShadeModel(GL_SMOOTH)
-    glEnable(GL_CULL_FACE)
+    glClearColor(0.8, 1.0, 0.7, 1.0)
     glEnable(GL_DEPTH_TEST)
-    glEnable(GL_LIGHTING)
-    glutDisplayFunc(glutDisplay)
-
-    glutIdleFunc(glutDisplay)    
+    glCullFace(GL_BACK)
+    
     renderer = Renderer()
-    renderer.start('flat')
 
-    glutMainLoop()
+    while not glfw.window_should_close(window):
+        glfw.poll_events()
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        renderer.start('flat')
+        glfw.swap_buffers(window)
+    glfw.terminate()
+
+    # glutInit()
+    # glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    # glutInitWindowSize(800, 800)
+    # glutInitWindowPosition(350, 200)
+
+    # glutCreateWindow("FlatShading")
+    # glutDisplayFunc(glutDisplay)
+
+    # glutIdleFunc(glutDisplay)   
+    # glutReshapeFunc(glutResize) 
+    # renderer = Renderer()
+    # renderer.start('flat')
+
+    # glutMainLoop()
 
 if __name__ == '__main__':
     main()
