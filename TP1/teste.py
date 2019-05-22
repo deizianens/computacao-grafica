@@ -24,7 +24,7 @@ uniform mat4 projection, modelview, normalMat;
 
 out vec3 normalInterp;
 out vec3 vertPos;
-out vec3 vertexColor; //only for gouraud
+out vec4 vertexColor; //only for gouraud
 
 const vec3 lightPos = vec3(2.0, 1.0, 1.0);
 const vec3 ambientColor = vec3(0.0, 0.1, 0.1);
@@ -105,7 +105,7 @@ void main(){
 
         color = vec4(ambientColor +
                       lambertian*diffuseColor +
-                      specular*specColor, 1.0);
+                      specular*specularColor, 1.0);
 
     }
     // gouraud
@@ -127,9 +127,9 @@ void main(){
         float specAngle = max(dot(reflectDir, viewDir), 0.0);
         specular = pow(specAngle, 4.0);
         }
-        outputColor = vec4(ambientColor +
+        color = vec4(ambientColor +
                         lambertian*diffuseColor +
-                        specular*specColor, 1.0);
+                        specular*specularColor, 1.0);
 
 
     }
@@ -150,9 +150,9 @@ class Shape:
         glVertexAttrib3f(vn, 0.0, 0.0, 0.0)
         glDisableVertexAttribArray(vn)
 
-        if self.shape_type == 'sphere':
+        if self.shape == 'sphere':
             gluSphere(qobj, 1, 50, 50)
-        elif self.shape_type == 'cylinder':
+        elif self.shape == 'cylinder':
             gluCylinder(qobj, 1, 1, 1, 50, 50)
         else:
             glutSolidTeapot(50.0)
@@ -200,8 +200,8 @@ class Renderer:
 
     def start(self, shader, shape):
         glEnable(GL_DEPTH_TEST)
-        setupShaders(shader, shape)
-        display()
+        self.setupShaders(shader, shape)
+        
 
     def setupShaders(self, shader, s):
         glUseProgram(shader)
@@ -232,46 +232,45 @@ class Renderer:
         glClearColor(0.0, 0.0, 0.0, 0.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        rad = PI / 180.0 * t
+        rad = PI / 180.0 * self.t
     
-        mat4LookAt(modelview,
+        self.mat4LookAt(self.modelview,
                1.5*float(math.cos(rad)), 1.5*float(math.sin(rad)), 1.5, # eye
                0.0, 0.0, 0.0, # look at
                0.0, 0.0, 1.0) # up
 
 
-        modelviewInv = [] 
-        normalmatrix = []
-        mat4Invert(modelview, modelviewInv)
-        mat4Transpose(modelviewInv, normalmatrix)
+        modelviewInv = np.zeros((16,), dtype="float32")
+        normalmatrix = np.zeros((16,), dtype="float32")
+        self.mat4Invert(self.modelview, modelviewInv)
+        self.mat4Transpose(modelviewInv, normalmatrix)
         
         # load the current projection and modelview matrix into the
         # corresponding UNIFORM variables of the shader
-        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, projection)
-        glUniformMatrix4fv(modelviewLoc, 1, GL_FALSE, modelview)
-        if(normalMatrixLoc != -1):
-            glUniformMatrix4fv(normalMatrixLoc, 1, GL_FALSE, normalmatrix)
-        if(modeLoc != -1):
-            glUniform1i(modeLoc, modeVal)
+        glUniformMatrix4fv(self.projectionLoc, 1, GL_FALSE, self.projection)
+        glUniformMatrix4fv(self.modelviewLoc, 1, GL_FALSE, self.modelview)
+        if(self.normalMatrixLoc != -1):
+            glUniformMatrix4fv(self.normalMatrixLoc, 1, GL_FALSE, normalmatrix)
+       
 
 
     
     # ----- the following functions are some matrix and vector helpers --------
-    def vec3Dot(a, b):
+    def vec3Dot(self, a, b):
         return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
 
-    def vec3Cross(a, b, res):
+    def vec3Cross(self, a, b, res):
         res[0] = a[1] * b[2]  -  b[1] * a[2]
         res[1] = a[2] * b[0]  -  b[2] * a[0]
         res[2] = a[0] * b[1]  -  b[0] * a[1]
 
 
-    def vec3Normalize(a):
+    def vec3Normalize(self, a):
         mag = math.sqrt(a[0] * a[0]  +  a[1] * a[1]  +  a[2] * a[2])
         a[0] /= mag; a[1] /= mag; a[2] /= mag
   
 
-    def mat4Identity(a):
+    def mat4Identity(self, a):
         for i in range(16):
             a[i] = 0.0
         for i in range(4):
@@ -285,9 +284,9 @@ class Renderer:
                     res[j*4 + i] += a[k*4 + i] * b[j*4 + k]
 
     
-    def mat4Perspective(a, fov, aspect, zNear, zFar):
-        f = 1.0 / (tan (fov/2.0 * (PI / 180.0)))
-        mat4Identity(a)
+    def mat4Perspective(self, a, fov, aspect, zNear, zFar):
+        f = 1.0 / (math.tan (fov/2.0 * (PI / 180.0)))
+        self.mat4Identity(a)
         a[0] = f / aspect
         a[1 * 4 + 1] = f
         a[2 * 4 + 2] = (zFar + zNear)  / (zNear - zFar)
@@ -296,15 +295,15 @@ class Renderer:
         a[3 * 4 + 3] = 0.0
     
 
-    def mat4LookAt(viewMatrix,
+    def mat4LookAt(self,viewMatrix,
                     eyeX, eyeY, eyeZ,
                     centerX, centerY, centerZ,
                     upX, upY, upZ):
 
-        dr = [] 
-        right = [] 
-        up = []
-        eye = []
+        dr = np.zeros((3,), dtype="float32")
+        right = np.zeros((3,), dtype="float32")
+        up = np.zeros((3,), dtype="float32")
+        eye = np.zeros((3,), dtype="float32")
 
         up[0]=upX
         up[1]=upY 
@@ -318,29 +317,29 @@ class Renderer:
         dr[1]=centerY-eyeY
         dr[2]=centerZ-eyeZ
 
-        vec3Normalize(dr)
-        vec3Cross(dr,up,right)
-        vec3Normalize(right)
-        vec3Cross(right,dr,up)
-        vec3Normalize(up)
+        self.vec3Normalize(dr)
+        self.vec3Cross(dr,up,right)
+        self.vec3Normalize(right)
+        self.vec3Cross(right,dr,up)
+        self.vec3Normalize(up)
 
         # first row
         viewMatrix[0]  = right[0]
         viewMatrix[4]  = right[1]
         viewMatrix[8]  = right[2]
-        viewMatrix[12] = -vec3Dot(right, eye)
+        viewMatrix[12] = -self.vec3Dot(right, eye)
 
         # second row
         viewMatrix[1]  = up[0]
         viewMatrix[5]  = up[1]
         viewMatrix[9]  = up[2]
-        viewMatrix[13] = -vec3Dot(up, eye)
+        viewMatrix[13] = -self.vec3Dot(up, eye)
         
         # third row
         viewMatrix[2]  = -dr[0]
         viewMatrix[6]  = -dr[1]
         viewMatrix[10] = -dr[2]
-        viewMatrix[14] =  vec3Dot(dr, eye)
+        viewMatrix[14] =  self.vec3Dot(dr, eye)
 
         # forth row
         viewMatrix[3]  = 0.0
@@ -349,7 +348,7 @@ class Renderer:
         viewMatrix[15] = 1.0
     
 
-    def mat4Print(a):
+    def mat4Print(self, a):
         # opengl uses column major order
         for i in range(4):
             for i in range(4): 
@@ -357,7 +356,7 @@ class Renderer:
             print("\n")
         
 
-    def mat4Transpose(a, transposed):
+    def mat4Transpose(self,a, transposed):
         t = 0
         for i in range(4):
             for j in range(4): 
@@ -365,8 +364,8 @@ class Renderer:
                 t +=1
         
 
-    def mat4Invert(m, inverse):
-        inv = []
+    def mat4Invert(self,m, inverse):
+        inv = np.zeros((16,), dtype="float32")
         inv[0] = m[5]*m[10]*m[15]-m[5]*m[11]*m[14]-m[9]*m[6]*m[15]+m[9]*m[7]*m[14]+m[13]*m[6]*m[11]-m[13]*m[7]*m[10]
         inv[4] = -m[4]*m[10]*m[15]+m[4]*m[11]*m[14]+m[8]*m[6]*m[15]-m[8]*m[7]*m[14]-m[12]*m[6]*m[11]+m[12]*m[7]*m[10]
         inv[8] = m[4]*m[9]*m[15]-m[4]*m[11]*m[13]-m[8]*m[5]*m[15]+m[8]*m[7]*m[13]+m[12]*m[5]*m[11]-m[12]*m[7]*m[9]
@@ -388,7 +387,7 @@ class Renderer:
         if (det == 0):
              return False
         det = 1.0 / det
-        for j in range(16):
+        for i in range(16):
             inverse[i] = inv[i] * det
         return True
 
@@ -403,12 +402,12 @@ def glutDisplay():
 def main():
     glutInit(sys.argv)
     glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGBA)
-    glutInitWindowPosition(100,100)
-    glutInitWindowSize(320, 320)
+    glutInitWindowPosition(300,40)
+    glutInitWindowSize(700, 700)
 
     window = glutCreateWindow("Shading")
     glutDisplayFunc(glutDisplay)
-    glutFullScreen()
+    # glutFullScreen()
 
     glutIdleFunc(glutDisplay)
     # glutReshapeFunc(glutResize)
@@ -421,7 +420,7 @@ def main():
     renderer = Renderer()
     renderer.start(shader, 'sphere')
     shape.render()
-    glutDisplay(renderer)
+    glutDisplay()
 
     glutMainLoop()
 
