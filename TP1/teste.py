@@ -91,12 +91,45 @@ void main(void)
 fragment_shader_gouraud = '''
 #version 140
 
-varying vec4 varyingColor;
+uniform vec4 ambientColor;
+uniform vec4 diffuseColor;
+uniform vec4 specularColor; 
+
+varying vec3 varyingVertex;
+varying vec3 varyingLightDir;
+varying vec3 varyingNormal;
+
 out vec4 color;
+
+float intensity(vec3 u, vec3 v) {
+	return  max(0.0, dot(normalize(u), normalize(v)));
+}
 
 void main(void) 
 {
-	color = varyingColor;
+    // Eye position is view direction
+    vec3 eye = normalize(-varyingVertex);
+
+    // Direction of reflected light
+    vec3 reflected = normalize(reflect(-varyingLightDir, varyingNormal));
+
+    // Ambient color
+    vec4 ambientC  = gl_LightSource[0].ambient * ambientColor;
+    color = ambientC;
+
+    // Dot product between normal and light direction gives diffuse intensity
+    float dI = intensity(varyingNormal,varyingLightDir);
+    vec4 diffuseC  = dI * gl_LightSource[0].diffuse * diffuseColor;
+    color += diffuseC;
+
+    // If diffuse light is zero, don't even bother with the power function
+    if(dI != 0.0) {
+        // Dot product between reflected light direction and view direction gives specular intensity
+        float shininess = 128.0; 
+        float sI = pow(intensity(reflected, eye), shininess);
+        vec4 specularC = sI * gl_LightSource[0].specular * specularColor;
+        color  += specularC;
+    }
 }
 '''
 
@@ -181,7 +214,7 @@ myVBO = None
 data = []
 wireframe = False
 startP = 0, 0
-WIDTH, HEIGHT = 500, 500
+WIDTH, HEIGHT = 1000, 800
 angle = 0
 axis = [1, 0, 0]
 actOrient = identity(4, float)
@@ -190,7 +223,6 @@ scaleFactor = 1.0
 program,  vertexShader,  fragmentShader = None, None, None
 program2, vertexShader2, fragmentShader2 = None, None, None
 program3, vertexShader3, fragmentShader3 = None, None, None
-shader = 1
 projectionMatrix = identity(4)
 
 #
@@ -479,11 +511,15 @@ def resizeViewport(width, height):
 	glutPostRedisplay()
 
 
+shader = 0
+
 # run the script
 if __name__ == "__main__":
     # load data
     vertices, normals, faces = [], [], []
-    f = open('teste.obj', 'r')
+    f = open('sphere.obj', 'r')
+    # f = open('cylinder.obj', 'r')
+    # f = open('teapot.obj', 'r')
     for line in f:
         sl = line.split()
         if len(sl) > 0:
@@ -502,7 +538,7 @@ if __name__ == "__main__":
     center = [(x[1]+x[0])/2.0 for x in zip(*bb)]
 	# scale factor
     # scale = 2.0/max([(x[1]-x[0]) for x in zip(*bb)])
-    scale = 1
+    scale = .5
 
 	# set data
     data = []
