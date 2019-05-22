@@ -4,10 +4,10 @@ from OpenGL.GL import *
 from OpenGL.GL import shaders
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
-from enum import Enum 
 
 import glfw
 import math
+import numpy as np
 
 
 PI = 3.14
@@ -26,27 +26,26 @@ out vec3 normalInterp;
 out vec3 vertPos;
 out vec3 vertexColor; //only for gouraud
 
+const vec3 lightPos = vec3(2.0, 1.0, 1.0);
+const vec3 ambientColor = vec3(0.0, 0.1, 0.1);
+const vec3 diffuseColor = vec3(0.0, 0.6, 0.6);
+const vec3 specularColor = vec3(1.0, 1.0, 1.0);
 
-uniform vec3 ambientColor;
-uniform vec3 diffuseColor;
-uniform vec3 specularColor;
-uniform vec3 lightPos; // Light position
-
-// uniform float Ka;   // Ambient reflection coefficient
-// uniform float Kd;   // Diffuse reflection coefficient
-// uniform float Ks;   // Specular reflection coefficient
-// uniform float shininessVal; // Shininess
+uniform float Ka;   // Ambient reflection coefficient
+uniform float Kd;   // Diffuse reflection coefficient
+uniform float Ks;   // Specular reflection coefficient
+uniform float shininessVal; // Shininess
 
 
-def main(){
-    gl_Position = projection * modelview * vec4(inputPosition, 1.0);
+void main(){
+    gl_Position = projection * modelview * vec4(position, 1.0);
 
-    vec4 vertPos4 = modelview * vec4(position, 1.0);
-    vertPos = vec3(vertPos4) / vertPos4.w;
     normalInterp = vec3(normalMat * vec4(normal, 0.0));
 
     // ------------ only for gouraud -----------------
     vec3 normal = vec3(normalMat * vec4(normal, 0.0));
+    vec4 vertPos4 = modelview * vec4(position, 1.0);
+    vertPos = vec3(vertPos4) / vertPos4.w;
     vec3 lightDir = normalize(lightPos - vertPos);
     vec3 reflectDir = reflect(-lightDir, normal);
     vec3 viewDir = normalize(-vertPos);
@@ -59,7 +58,7 @@ def main(){
        specular = pow(specAngle, 4.0);
     }
 
-    vertexColor = vec4(ambientColor+lambertian*diffuseColor + specular*specColor, 1.0);
+    vertexColor = vec4(ambientColor+lambertian*diffuseColor + specular*specularColor, 1.0);
 
 }
 
@@ -68,27 +67,27 @@ def main(){
 fragment_shader = '''
 #version 330
 
-// precision mediump float;
+precision mediump float;
 
 in vec3 normalInterp;  // Surface normal
 in vec3 vertPos;       // Vertex position
 in vec4 vertexColor;  // Only for gouraud
 
-uniform vec3 lightPos; // Light position
-uniform vec3 ambientColor;
-uniform vec3 diffuseColor;
-uniform vec3 specularColor;
+const vec3 lightPos = vec3(2.0,1.0,1.0);
+const vec3 ambientColor = vec3(0.0, 0.1, 0.1);
+const vec3 diffuseColor = vec3(0.0, 0.6, 0.6);
+const vec3 specularColor = vec3(1.0, 1.0, 1.0);
+
 uniform int shading;
+
+uniform float Ka;   // Ambient reflection coefficient
+uniform float Kd;   // Diffuse reflection coefficient
+uniform float Ks;   // Specular reflection coefficient
+uniform float shininessVal; // Shininess 
 
 out vec4 color;
 
-// uniform float Ka;   // Ambient reflection coefficient
-// uniform float Kd;   // Diffuse reflection coefficient
-// uniform float Ks;   // Specular reflection coefficient
-// uniform float shininessVal; // Shininess 
-
-
-def main(){    
+void main(){    
     //flat
     if(shading == 0) {
         vec3 normal = normalize(normalInterp);
@@ -137,143 +136,98 @@ def main(){
 }
 '''
 
+  
 class Shape:
     def __init__(self, shape, shader):
-        self.material = material
         self.shape = shape
         self.shader = shader
 
     def render(self):
-        setupShaders()
-        
-        #transformation uniforms
-        model_transform = pyrr.Matrix44.identity()
-        perspective_transform = pyrr.Matrix44.perspective_projection(45, 4/3, 0.01, 100)
-        camera_transform = pyrr.Matrix44.look_at((2, 2, 2), (0, 0, 0), (0, 1, 0))
-        
-        modelviewLoc = glGetUniformLocation(self.shader, 'modelView')
-        glUniformMatrix4fv(modelviewLoc, 1, GL_FALSE, model_transform)
-        projectionLoc = glGetUniformLocation(self.shader, 'projection')
-        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, perspective_transform)
-        
-        quad = gluNewQuadric()
-        gluQuadricNormals(quad, GLU_SMOOTH)
-        gluQuadricOrientation(quad, GLU_OUTSIDE)
-        if self.shape == 'sphere':
-            gluSphere(quad, 2.0, 256, 256) # parameters: GLUquadric* quad, GLdouble radius, GLint slices, GLint stacks
-        elif self.shape == 'cylinder':
-            gluCylinder(quad, 2.0, 2.0, 5.0, 256, 256) # parameters: GLUquadric* quad, GLdouble base, GLdouble top, GLdouble height, GLint slices, GLint stacks
+        qobj = gluNewQuadric()
+        gluQuadricNormals(qobj, GLU_SMOOTH)
+        gluQuadricOrientation(qobj, GLU_OUTSIDE)
+        vn = glGetAttribLocation(self.shader, 'normal')
+        glVertexAttrib3f(vn, 0.0, 0.0, 0.0)
+        glDisableVertexAttribArray(vn)
+
+        if self.shape_type == 'sphere':
+            gluSphere(qobj, 1, 50, 50)
+        elif self.shape_type == 'cylinder':
+            gluCylinder(qobj, 1, 1, 1, 50, 50)
         else:
             glutSolidTeapot(50.0)
 
 
-
-
-def setupShaders(s, shader):
-    glUseProgram(shader)
-    
-    # retrieve the location of the IN variables of the vertex shader
-    vertexLoc = glGetAttribLocation(shader, "position")
-    normalLoc = glGetAttribLocation(shader, "normal")
-
-    # retrieve the location of the UNIFORM variables of the shader
-    projectionLoc = glGetUniformLocation(shader, "projection")
-    modelviewLoc = glGetUniformLocation(shader, "modelview")
-    normalMatrixLoc = glGetUniformLocation(shader, "normalMat")
-    lightPosLoc = glGetUniformLocation(shader, "lightPos")
-    ambientColorLoc = glGetUniformLocation(shader, "ambientColor")
-    diffuseColorLoc = glGetUniformLocation(shader, "diffuseColor")
-    specularColorLoc = glGetUniformLocation(shader, "specularColor")
-    shininessLoc = glGetUniformLocation(shader, "shininessVal")
-    kaLoc = glGetUniformLocation(shader, "Ka")
-    kdLoc = glGetUniformLocation(shader, "Kd")
-    ksLoc = glGetUniformLocation(shader, "Ks")
-
-    shading = glGetUniformLocation(shader, 'shading')
-    if s == 'flat':
-        glUniform1i(shading, 0)
-    elif s == 'gouraud':
-        glUniform1i(shading, 1)
-    else:
-        glUniform1i(shading, 2)
-
-class Vertex:
-    position = []
-    texCoord = [] #coordinate
-    normal = []
-  
-
 class Renderer:
     def __init__(self):
-        self.vertex = Vertex()
-
         self.t = 0.0
         self.modeVal = 0
-
-        Enum(Scene, numVAOs) #Vertex Array Object
-        Enum(SceneAll, numVBOs)
-        self.vaoID[numVAOs]
-        self.bufID[numVBOs]
+        self.lightPos = [1.0, 1.0, -1.0]
+        self.lightVec = np.array([0, 0, 0], dtype="float32")
+        self.ambientColor = [0.2, 0.1, 0.0]
+        self.diffuseColor = [0.8, 0.4, 0.0]
+        self.specularColor = [1.0, 1.0, 1.0]
+        self.clearColor = [0.0, 0.4, 0.7]
+        self.attenuation = 0.01
+        self.shininess = 80.0
+        self.kaVal = 1.0
+        self.kdVal = 1.0
+        self.ksVal = 1.0
+       
         self.sceneVertNo = 0
         self.progID = 0
         self.vertID = 0
         self.fragID = 0
-        self.vertexLoc = -1
-        self.texCoordLoc = -1
-        self.normalLoc = -1
-        self.projectionLoc = -1
-        self.modelviewLoc = -1
-        self.normalMatrixLoc = -1
-        self.modeLoc = -1
-        self.projection = [];  # projection matrix
-        self.modelview = [];   # modelview matrix
-        self.filename = "./sphere.vbo"
-        self.file = 0
+        self.vertexLoc = 0
+        self.texCoordLoc = 0
+        self.normalLoc = 0
+        self.projectionLoc = 0
+        self.modelviewLoc = 0
+        self.normalMatrixLoc = 0
+        self.modeLoc = 0
+        self.kaLoc = 0
+        self.kdLoc = 0
+        self.ksLoc = 0
+        self.attenuationLoc = 0
+        self.shininessLoc = 0
+        self.lightPosLoc = 0
+        self.lightVecLoc = 0
+        self.ambientColorLoc = 0
+        self.diffuseColorLoc = 0
+        self.specularColorLoc = 0
+        self.projection = np.zeros((16,), dtype="float32")  # projection matrix
+        self.modelview = np.zeros((16,), dtype="float32")   # modelview matrix
 
-    def init(self):
+    def start(self, shader, shape):
         glEnable(GL_DEPTH_TEST)
-        setupShaders()
+        setupShaders(shader, shape)
+        display()
 
-        # create a Vertex Array Objects (VAO)
-        glGenVertexArrays(numVAOs, vaoID)
-
-        # generate a Vertex Buffer Object (VBO)
-        glGenBuffers(numVBOs, bufID)
-
-        # binding the pyramid VAO
-        glBindVertexArray(vaoID[Scene])
-
-        data = list()
-        loadVertexData(filename, data)
-
-        sceneVertexData = loadVertexData(currentFileName)
-        sceneVertNo = int(data.lenght()) / (3+2+3)
-
-        glBindBuffer(GL_ARRAY_BUFFER, bufID[SceneAll])
-        glBufferData(GL_ARRAY_BUFFER, data[0], GL_STATIC_DRAW) # size can be omitted
-
-        stride = sys.getsizeof(vertex)
-        offset = None
-
-        # position
-        if(vertexLoc != -1):
-            glVertexAttribPointer(vertexLoc, 3, GL_FLOAT, GL_FALSE, stride, offset)
-            glEnableVertexAttribArray(vertexLoc)
-        
-
-        # texCoord
-        if(texCoordLoc != -1):
-            offset = None + 3*sys.getsizeof(float)
-            glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, stride, offset)
-            glEnableVertexAttribArray(texCoordLoc)
-        
-
-        # normal
-        if(normalLoc != -1):
-            offset = None + (3+2)*sys.getsizeof(float)
-            glVertexAttribPointer(normalLoc, 3, GL_FLOAT, GL_FALSE, stride, offset)
-            glEnableVertexAttribArray(normalLoc)
+    def setupShaders(self, shader, s):
+        glUseProgram(shader)
     
+        # retrieve the location of the IN variables of the vertex shaders
+        vertexLoc = glGetAttribLocation(shader,"position")
+        texCoordLoc = glGetAttribLocation(shader,"TexCoord")
+        normalLoc = glGetAttribLocation(shader, "normal")
+
+        # retrieve the location of the UNIFORM variables of the shader
+        projectionLoc = glGetUniformLocation(shader, "projection")
+        modelviewLoc = glGetUniformLocation(shader, "modelview")
+        normalMatrixLoc = glGetUniformLocation(shader, "normalMat")
+        # lightPosLoc = glGetUniformLocation(shader, "lightPos")
+        # ambientColorLoc = glGetUniformLocation(shader, "ambientColor")
+        # diffuseColorLoc = glGetUniformLocation(shader, "diffuseColor")
+        # specularColorLoc = glGetUniformLocation(shader, "specularColor")
+        
+        shading = glGetUniformLocation(shader, 'shading')
+        if s == 'flat':
+            glUniform1i(shading, 0)
+        elif s == 'gouraud':
+            glUniform1i(shading, 1)
+        else:
+            glUniform1i(shading, 2)
+
     def display(self):
         glClearColor(0.0, 0.0, 0.0, 0.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -281,7 +235,7 @@ class Renderer:
         rad = PI / 180.0 * t
     
         mat4LookAt(modelview,
-               1.5*float(cos(rad)), 1.5*float(sin(rad)), 1.5, # eye
+               1.5*float(math.cos(rad)), 1.5*float(math.sin(rad)), 1.5, # eye
                0.0, 0.0, 0.0, # look at
                0.0, 0.0, 1.0) # up
 
@@ -290,51 +244,17 @@ class Renderer:
         normalmatrix = []
         mat4Invert(modelview, modelviewInv)
         mat4Transpose(modelviewInv, normalmatrix)
-
-        glUseProgram(progID)
         
         # load the current projection and modelview matrix into the
         # corresponding UNIFORM variables of the shader
-        glUniformMatrix4fv(projectionLoc, 1, false, projection)
-        glUniformMatrix4fv(modelviewLoc, 1, false, modelview)
+        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, projection)
+        glUniformMatrix4fv(modelviewLoc, 1, GL_FALSE, modelview)
         if(normalMatrixLoc != -1):
-            glUniformMatrix4fv(normalMatrixLoc, 1, false, normalmatrix)
+            glUniformMatrix4fv(normalMatrixLoc, 1, GL_FALSE, normalmatrix)
         if(modeLoc != -1):
             glUniform1i(modeLoc, modeVal)
 
-        # bind Triangle VAO
-        glBindVertexArray(vaoID[Scene])
-        # render data
-        glDrawArrays(GL_TRIANGLES, 0, sceneVertNo)
-  
 
-    def setupShaders(self, s):
-        # compile the shader
-        shader = shaders.compileProgram(shaders.compileShader(vertex_shader, GL_VERTEX_SHADER), shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
-
-        glUseProgram(shader)
-    
-        # retrieve the location of the IN variables of the vertex shaders
-        vertexLoc = glGetAttribLocation(progID,"Position")
-        texCoordLoc = glGetAttribLocation(progID,"TexCoord")
-        normalLoc = glGetAttribLocation(progID, "Normal")
-
-        # retrieve the location of the UNIFORM variables of the shader
-        projectionLoc = glGetUniformLocation(shader, "projection")
-        modelviewLoc = glGetUniformLocation(shader, "modelview")
-        normalMatrixLoc = glGetUniformLocation(shader, "normalMat")
-        lightPosLoc = glGetUniformLocation(shader, "lightPos")
-        ambientColorLoc = glGetUniformLocation(shader, "ambientColor")
-        diffuseColorLoc = glGetUniformLocation(shader, "diffuseColor")
-        specularColorLoc = glGetUniformLocation(shader, "specularColor")
-        shading = glGetUniformLocation(shader, 'shading')
-
-        if s == 'flat':
-            glUniform1i(shading, 0)
-        elif s == 'gouraud':
-            glUniform1i(shading, 1)
-        else:
-            glUniform1i(shading, 2)
     
     # ----- the following functions are some matrix and vector helpers --------
     def vec3Dot(a, b):
@@ -471,7 +391,13 @@ class Renderer:
         for j in range(16):
             inverse[i] = inv[i] * det
         return True
-  
+
+renderer = Renderer()
+
+def glutDisplay():
+  renderer.display()
+  glutSwapBuffers()
+  glutReportErrors()
 
 
 def main():
@@ -485,11 +411,17 @@ def main():
     glutFullScreen()
 
     glutIdleFunc(glutDisplay)
-    glutReshapeFunc(glutResize)
-    glutKeyboardFunc(glutKeyboard)
+    # glutReshapeFunc(glutResize)
+    # glutKeyboardFunc(glutKeyboard)
+
+    # compile the shader
+    shader = shaders.compileProgram(shaders.compileShader(vertex_shader, GL_VERTEX_SHADER), shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
+    shape = Shape('sphere', shader)
 
     renderer = Renderer()
-    renderer.init()
+    renderer.start(shader, 'sphere')
+    shape.render()
+    glutDisplay(renderer)
 
     glutMainLoop()
 
