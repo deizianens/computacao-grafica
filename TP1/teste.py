@@ -14,25 +14,80 @@ from math import cos, sin, acos, sqrt, pi
 vertex_shader_flat = '''
 #version 140
 
-varying vec4 vVaryingColor;
+uniform mat4 mvpMatrix; 
+uniform mat4 mvMatrix; 
+uniform mat3 normalMatrix; 
+uniform vec3 lightPosition; 
+
+varying vec3 varyingVertex;
+varying vec3 varyingLightDir;
+flat varying vec3 varyingNormal;
+
 out vec4 color;
 
-void main(void) 
+void main(void)
 {
-	color = vVaryingColor;
-}
+    // Get surface normal in eye coordinates
+    varyingNormal = normalMatrix * gl_Normal; 
 
+    // Get vertex position in eye coordinates
+    vec4 vPosition4 = mvMatrix * gl_Vertex; 
+    varyingVertex = vPosition4.xyz / vPosition4.w;
+    
+    // Get vector to light source
+    varyingLightDir = normalize(lightPosition - varyingVertex);
+    
+    // Transform the geometry
+    gl_Position = mvpMatrix * gl_Vertex; 
+}
 '''
 
 fragment_shader_flat = '''
 #version 140
 
-varying vec4 vVaryingColor;
+uniform vec4 ambientColor;
+uniform vec4 diffuseColor;
+uniform vec4 specularColor; 
+
+varying vec3 varyingVertex;
+varying vec3 varyingLightDir;
+flat varying vec3 varyingNormal;
+
 out vec4 color;
 
-void main(void) 
+float intensity(vec3 u, vec3 v) {
+	return  max(0.0, dot(normalize(u), normalize(v)));
+}
+
+void main(void)     
 {
-	color = vVaryingColor;
+    // Eye position is view direction
+    vec3 eye = normalize(-varyingVertex);
+
+    vec3 xTangent = dFdx( eye );
+    vec3 yTangent = dFdy( eye );
+    vec3 faceNormal = normalize( cross( xTangent, yTangent ) );
+
+    // Direction of reflected light
+    vec3 reflected = normalize(reflect(-varyingLightDir, varyingNormal));
+
+    // Ambient color
+    vec4 ambientC  = gl_LightSource[0].ambient * ambientColor;
+    color = ambientC;
+
+    // Dot product between normal and light direction gives diffuse intensity
+    float dI = intensity(varyingNormal,varyingLightDir);
+    vec4 diffuseC  = dI * gl_LightSource[0].diffuse * diffuseColor;
+    color += diffuseC;
+
+    // If diffuse light is zero, don't even bother with the power function
+    if(dI != 0.0) {
+        // Dot product between reflected light direction and view direction gives specular intensity
+        float shininess = 128.0; 
+        float sI = pow(intensity(reflected, eye), shininess);
+        vec4 specularC = sI * gl_LightSource[0].specular * specularColor;
+        color  += specularC;
+    }
 }
 '''
 
@@ -91,45 +146,12 @@ void main(void)
 fragment_shader_gouraud = '''
 #version 140
 
-uniform vec4 ambientColor;
-uniform vec4 diffuseColor;
-uniform vec4 specularColor; 
-
-varying vec3 varyingVertex;
-varying vec3 varyingLightDir;
-varying vec3 varyingNormal;
-
+varying vec4 varyingColor;
 out vec4 color;
-
-float intensity(vec3 u, vec3 v) {
-	return  max(0.0, dot(normalize(u), normalize(v)));
-}
 
 void main(void) 
 {
-    // Eye position is view direction
-    vec3 eye = normalize(-varyingVertex);
-
-    // Direction of reflected light
-    vec3 reflected = normalize(reflect(-varyingLightDir, varyingNormal));
-
-    // Ambient color
-    vec4 ambientC  = gl_LightSource[0].ambient * ambientColor;
-    color = ambientC;
-
-    // Dot product between normal and light direction gives diffuse intensity
-    float dI = intensity(varyingNormal,varyingLightDir);
-    vec4 diffuseC  = dI * gl_LightSource[0].diffuse * diffuseColor;
-    color += diffuseC;
-
-    // If diffuse light is zero, don't even bother with the power function
-    if(dI != 0.0) {
-        // Dot product between reflected light direction and view direction gives specular intensity
-        float shininess = 128.0; 
-        float sI = pow(intensity(reflected, eye), shininess);
-        vec4 specularC = sI * gl_LightSource[0].specular * specularColor;
-        color  += specularC;
-    }
+	color = varyingColor;
 }
 '''
 
@@ -511,7 +533,7 @@ def resizeViewport(width, height):
 	glutPostRedisplay()
 
 
-shader = 0
+shader = 2
 
 # run the script
 if __name__ == "__main__":
