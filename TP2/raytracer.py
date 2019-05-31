@@ -41,6 +41,9 @@ class Vec3(object):
         assert type(number) == float or type(number) == int
         return Vec3(self.x*number, self.y*number, self.z*number)
 
+    def __str__(self):
+        return '(' + str(self.x) + ',' + str(self.y) + ',' + str(self.z) + ')'
+
 
 '''
 At the core of a ray tracer is to send rays through pixels and 
@@ -66,12 +69,6 @@ class Sphere:
         self.color = color
 
 
-def color(r):
-    u_direction = Vec3(0,0,0)
-    u_direction = Vec3.normalize(r.direction)
-    t = 0.5*(u_direction.y + 1.0)
-    return Vec3(1.0, 1.0, 1.0).__mul__((1.0*t)).__add__(Vec3(0.5, 0.7, 1.0).__mul__(t))
-
 '''
 Trace rays 
 '''
@@ -82,25 +79,31 @@ def trace(ray_orig, ray_dest):
 '''
 Calculate whether a ray intersects or not an item on scene 
 '''
-def intersect(ray, shape):
-    oc = ray.origin - shape.center
+def intersect(center, radius, ray):
+    oc = ray.origin - center
     a = ray.direction.dot(ray.direction)
     b = 2 * oc.dot(ray.direction)
-    c = oc.dot(oc) - shape.radius * shape.radius
+    c = oc.dot(oc) - radius * radius
 
     # delta
     discriminant = b * b - 4 * a * c 
 
-    if(discriminant >= 0):
-        return 1
-    else:
-        return -1
+    return(discriminant > 0)
+
+
+def color(r):
+    if(intersect(Vec3(0,0,-1), 0.5, r)):
+        return Vec3(1, 0, 0)
+    u_direction = Vec3.normalize(r.direction)
+    t = 0.1*(u_direction.y + 1.0)
+    # print(u_direction.__str__())
+    return Vec3(1.0, 1.0, 1.0).__mul__((1.0*t)).__add__(Vec3(0.5, 0.7, 1.0).__mul__(t))
 
 
 def main():
     # default image size
-    width = 340
-    height = 480
+    width = 480
+    height = 340
     output = None
 
     # reads output file name
@@ -130,9 +133,9 @@ def main():
             r = Ray(origin, lower_left_corner.__add__(horizontal.__mul__(u).__add__(vertical.__mul__(v))))
             col = Vec3(color(r).x, color(r).y, color(r).z)
             index = 3 * (j * width + i)
-            image[index] = int(255)           # red channel
-            image[index + 1] = int(155)         # green channel
-            image[index + 2] = int(55)         # blue channel
+            image[index]        = int(255*col.x)  # red channel
+            image[index + 1]    = int(255*col.y)  # green channel
+            image[index + 2]    = int(255*col.z)  # blue channel
           
 
 
