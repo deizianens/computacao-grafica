@@ -88,12 +88,19 @@ def intersect(center, radius, ray):
     # delta
     discriminant = b * b - 4 * a * c 
 
-    return(discriminant > 0)
+    if(discriminant < 0):
+        return -1
+    else:
+        # bhaskara!
+        return(-b - sqrt(discriminant))/ (2.0*a)
 
 
 def color(r):
-    if(intersect(Vec3(0,0,-1), 0.5, r)):
-        return Vec3(1, 0, 0)
+    t = intersect(Vec3(0,0,-1), 0.5, r) 
+    if(t > 0.0):
+        N = Vec3.normalize(r.point_at_parameter(t).__sub__(Vec3(0,0,-1)))
+        return Vec3(N.x+1, N.y+1,  N.z+1).__mul__(0.5)
+
     u_direction = Vec3.normalize(r.direction)
     t = 0.1*(u_direction.y + 1.0)
     # print(u_direction.__str__())
