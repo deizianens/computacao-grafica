@@ -24,19 +24,19 @@ class Vec3:
         if i == 2:
             return self.z
 
-    # u + v
+    # sum vectors
     def __add__(self, other):
         return Vec3(self.x + other.x, self.y + other.y, self.z + other.z)
 
-    # u - v
+    # subtract vectors
     def __sub__(self, other):
         return Vec3(self.x - other.x, self.y - other.y, self.z - other.z)
 
-    # u * v
+    # multiply vectors
     def __mul__(self, other):
         return Vec3(self.x * other.x, self.y * other.y, self.z * other.z)
 
-    # u / k or u / v
+    # divide vector by scalar or other vector
     def __truediv__(self, other):
         if isinstance(other, numbers.Real):
             return Vec3(self.x / other, self.y / other, self.z / other)
@@ -47,22 +47,19 @@ class Vec3:
     def __rmul__(self, other):
         return Vec3(other * self.x, other * self.y, other * self.z)
 
-    # length of u
+    # vector magnitude
     def length(self):
         return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
-    # N.B. Can't use __len__ since we need to return a floating-point value
 
-    # squared length of u
+    # squared length of vec
     def squared_length(self):
         return self.x * self.x + self.y * self.y + self.z * self.z
 
     # dot product
-    # ref: https://en.wikipedia.org/wiki/Dot_product
     def dot(self, other):
         return self.x * other.x + self.y * other.y + self.z * other.z
 
     # cross product
-    # ref: https://en.wikipedia.org/wiki/Cross_product
     def cross(self, other):
         x = self.y * other.z - self.z * other.y
         y = self.z * other.x - self.x * other.z
@@ -132,6 +129,9 @@ class Sphere(Hitable):
         self.radius = radius
         self.material = material
 
+    '''
+    Calculate whether a ray intersects or not an item on scene 
+    '''
     def hit(self, ray, t_min, t_max):
         oc = ray.origin - self.center
         a = ray.direction.dot(ray.direction)
@@ -320,25 +320,6 @@ def schlick(cosine, refractive_index):
     r0 = (1 - refractive_index) / (1 + refractive_index)
     r0 *= r0
     return r0 + (1 - r0) * pow(1 - cosine, 5)
-
-
-'''
-Calculate whether a ray intersects or not an item on scene 
-'''
-def intersect(center, radius, ray):
-    oc = ray.origin - center
-    a = ray.direction.dot(ray.direction)
-    b = 2 * oc.dot(ray.direction)
-    c = oc.dot(oc) - (radius * radius)
-
-    # delta
-    discriminant = b * b - 4 * a * c 
-
-    if(discriminant < 0):
-        return -1
-    else:
-        # bhaskara!
-        return(-b - math.sqrt(discriminant))/ (2.0*a)
 
 
 def color(ray, world, depth):
