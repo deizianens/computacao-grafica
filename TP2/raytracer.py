@@ -121,6 +121,8 @@ class HitableList(list, Hitable):
 
 
 '''
+Shapes
+
 Spheres, because spheres are cool! (and easy)
 '''
 class Sphere(Hitable):
@@ -158,6 +160,62 @@ class Sphere(Hitable):
 
         return None
 
+
+class Triangle(Hitable):
+    def __init__(self, v1, v2, v3, material=None):
+        self.v1 = v1
+        self.v2 = v2
+        self.v3 = v3
+        self.material = material  
+
+    '''
+    Calculate whether a ray intersects or not an item on scene 
+    '''
+    def hit(self, ray, t_min, t_max):
+        # triangle normal
+        tri_n = ((self.v1 - self.v2).cross(self.v2-self.v3)).unit()
+
+        n_dot_dir = (tri_n.dot(ray.direction))
+
+        if(n_dot_dir > 0):
+            return None
+
+        # ray parallel to triangle can't hit
+        if(abs(n_dot_dir) < 0.00001):
+            return None
+
+        # find the ray plane intersection first
+        d = -(tri_n.dot(self.v1))
+        t = -(tri_n.dot(ray.origin) + d)/n_dot_dir
+
+        if(t < t_min or t > t_max):
+            return None
+
+        p = ray.__call__(t)
+
+        s1 = self.v2 - self.v1 # get first side
+        v_to_p = p - self.v1 # get vector from one vertex to intersection point
+
+        # if the cross product of the side and line to point isn't in the same 
+        # direction as the normal, we are outside the triangle
+        if(s1.cross(v_to_p).dot(tri_n) < 0):
+            return None
+
+        s2 = self.v3 - self.v2 
+        v_to_p = p - self.v2 
+
+        if(s2.cross(v_to_p).dot(tri_n) < 0):
+            return None
+
+        s3 = self.v1 - self.v3 
+        v_to_p = p - self.v3 
+
+        if(s3.cross(v_to_p).dot(tri_n) < 0):
+            return None
+
+        normal = tri_n
+
+        return HitInfo(t, p, normal, self.material)
 
 '''
 Camera classes
@@ -379,6 +437,8 @@ def main():
 
     world = HitableList([
         Sphere(Vec3(1, 0, -1), 0.5, Metal(Vec3(0.8, 0.6, 0.2))),
+        Sphere(Vec3(-1, 0, -1), 0.5, Dielectric(1.5)),
+        Triangle(Vec3(0,0,0), Vec3(0,0,2), Vec3(0,1,2), Lambertian(Vec3(0.1, 0.2, 0.5)))
     ])
 
     cam = PositionalCamera(Vec3(-2, 2, 1), Vec3(0, 0, -1), Vec3(0, 1, 0), 90, width / height)
@@ -405,6 +465,8 @@ def main():
                 ig  = int(255.99 * col.y)  # green channel
                 ib  = int(255.99 * col.z)  # blue channel
                 f.write(f"{ir} {ig} {ib}\n")
+    
+    f.close()
 
 if __name__ == '__main__':
     main()
