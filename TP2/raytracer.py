@@ -34,6 +34,9 @@ class Vec3:
 
     # multiply vectors
     def __mul__(self, other):
+        if isinstance(other, numbers.Real):
+            return Vec3(self.x * other, self.y * other, self.z * other)
+
         return Vec3(self.x * other.x, self.y * other.y, self.z * other.z)
 
     # divide vector by scalar or other vector
@@ -217,6 +220,34 @@ class Triangle(Hitable):
 
         return HitInfo(t, p, normal, self.material)
 
+
+class Tori(Hitable):
+    def __init__(self, cen, ra, rb, m):
+        self.center = cen
+        self.radius_a = ra
+        self.radius_b = rb
+        self.ma = m
+
+    '''
+    Calculate whether a ray intersects or not an item on scene 
+    '''
+    def hit(self, r, t_min, t_max):
+        oc = r.origin - self.center
+        a = oc.dot(oc)
+        b = 2* oc.dot(r.direction)
+        c = r.direction.dot(r.direction)
+        r_square_p = self.radius_a * self.radius_a + self.radius_b * self.radius_b
+        r_square_s_square = (self.radius_a * self.radius_a - self.radius_b * self.radius_b) * (self.radius_a * self.radius_a - self.radius_b * self.radius_b)
+        r_square = self.radius_a * self.radius_a 
+        a4 = c*c
+        a3 = 2*b*c
+        a2 = b*b + 2*a*c - 2*r_square_p*c + 4*r_square*r.direction.z * r.direction.z
+        a1 = 2*a*b - 2*r_square_p*b + 8*r_square*oc.z()*r.direction().z()
+        a0 = a*a - 2*r_square_p*a + 4*r_square*oc.z*oc.z + r_square_s_square
+
+
+
+
 '''
 Camera classes
 '''
@@ -248,8 +279,15 @@ class FOVCamera:
         return Ray(self._origin, self._lower_left_corner + u*self._horizontal + v*self._vertical)
 
 
+# lookfrom  = the point in space where the camera is
+# lookat    = the point in space where the camera is looking at
+# vup       = the upward direction
+# vfov      = the vertical field of view 
+# aspect    = the aspect ratio of the output
+# aperture  = the aperture of the camera (measures like in a real lens)
+# focus_dist= the distance to focus at
 class PositionalCamera:
-    def __init__(self, lookfrom, lookat, vup, vfov, aspect):
+    def __init__(self, lookfrom, lookat, vup, vfov, aspect, aperture, focus_dist):
         theta = math.radians(vfov)
         half_height = math.tan(theta / 2)
         half_width = aspect * half_height
@@ -258,10 +296,10 @@ class PositionalCamera:
         u = vup.cross(w).unit()
         v = w.cross(u)
 
-        self._lower_left_corner = Vec3(-half_width, -half_height, -1)
-        self._lower_left_corner = lookfrom - half_width*u - half_height*v - w
-        self._horizontal = 2 * half_width * u
-        self._vertical = 2 * half_height * v
+        # self._lower_left_corner = Vec3(-half_width, -half_height, -1)
+        self._lower_left_corner = lookfrom - (half_width * focus_dist)*u - (half_height * focus_dist)*v - w * focus_dist
+        self._horizontal = 2 * half_width * focus_dist * u
+        self._vertical = 2 * half_height * focus_dist * v
         self._origin = lookfrom
 
     def ray(self, u, v):
@@ -437,12 +475,19 @@ def main():
 
     world = HitableList([
         Sphere(Vec3(1, 0, -1), 0.5, Metal(Vec3(0.8, 0.6, 0.2))),
-        Sphere(Vec3(-1, 0, -1), 0.5, Dielectric(1.5)),
-        Triangle(Vec3(0,0,0), Vec3(0,0,2), Vec3(0,1,2), Lambertian(Vec3(0.1, 0.2, 0.5)))
+        Triangle(Vec3(0,0,0), Vec3(0,0,1), Vec3(0,1,1), Lambertian(Vec3(0.1, 0.2, 0.5))),
+        Sphere(Vec3(-4, 2, 0), 1.0, Lambertian(Vec3(0.4, 0.2, 0.1))),
+        Sphere(Vec3(10, 12, 0), 1.0, Dielectric(1.5))
     ])
 
-    cam = PositionalCamera(Vec3(-2, 2, 1), Vec3(0, 0, -1), Vec3(0, 1, 0), 90, width / height)
-    ns = height
+
+    lookfrom = Vec3(-2, 2, 1)
+    lookat = Vec3(0, 0, -1)
+    dist_to_focus = (lookfrom - lookat).length()
+    aperture = 7.1
+
+    cam = PositionalCamera(lookfrom, lookat, Vec3(0, 1, 0), 90, width / height, aperture, dist_to_focus)
+    ns = height # number of samples
 
 
     # Save the PPM image as a binary file
