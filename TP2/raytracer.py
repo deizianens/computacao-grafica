@@ -6,6 +6,8 @@ import numbers
 import multiprocessing
 from collections import namedtuple
 
+NUM_CPU = multiprocessing.cpu_count() * 2
+
 # stores 3 values
 class Vec3:
     def __init__(self, x=0, y=0, z=0):
@@ -82,6 +84,10 @@ class Vec3:
     def __neg__(self):
         return Vec3(-self.x, -self.y, -self.z)
 
+    def set_(self, v):
+        self.x = v.x
+        self.y = v.y
+        self.z = v.z
 
     def __repr__(self):
         return '%s(%.3f, %.3f, %.3f)' % (__class__.__name__, self.x, self.y, self.z)
@@ -95,9 +101,13 @@ class Ray:
     def __init__(self, origin, direction):
         self.origin = origin
         self.direction = direction
+        self.time = 0
 
     def __call__(self, t):
         return self.origin + t * self.direction
+
+    def point_at_parameter(self, t):
+        return self.origin - (self.direction*t)
 
 
 class Hitable:
@@ -164,6 +174,48 @@ class Sphere(Hitable):
         return None
 
 
+class MovingSphere(Hitable):
+    def __init__(self, center0, center1, time0, time1, radius, material=None):
+        self.center0 = center0
+        self.center1 = center1
+        self.time0 = time0
+        self.time1 = time1
+        self.radius = radius
+        self.material = material
+
+    '''
+    Calculate whether a ray intersects or not an item on scene 
+    '''
+    def hit(self, ray, t_min, t_max):
+        oc = ray.origin - self.center(ray.time)
+        a = ray.direction.dot(ray.direction)
+        b = oc.dot(ray.direction)
+        c = oc.dot(oc) - self.radius*self.radius
+        discriminant = b*b - a*c
+
+        if discriminant > 0:
+            temp = (-b - math.sqrt(discriminant)) / (a)
+            if t_min < temp < t_max:
+                t = temp
+                p = ray(t)
+                normal = (p - self.center(ray.time)) / self.radius
+
+                return HitInfo(t, p, normal, self.material)
+
+            temp = (-b + math.sqrt(discriminant)) / (a)
+            if t_min < temp < t_max:
+                t = temp
+                p = ray(t)
+                normal = (p - self.center(ray.time)) / self.radius
+
+                return HitInfo(t, p, normal, self.material)
+
+        return None
+    
+    def center(self, time):
+        return self.center0 + ((self.center1 - self.center0) * ((time-self.time0)/(self.time1 - time)))
+
+
 class Triangle(Hitable):
     def __init__(self, v1, v2, v3, material=None):
         self.v1 = v1
@@ -219,32 +271,6 @@ class Triangle(Hitable):
         normal = tri_n
 
         return HitInfo(t, p, normal, self.material)
-
-
-class Tori(Hitable):
-    def __init__(self, cen, ra, rb, m):
-        self.center = cen
-        self.radius_a = ra
-        self.radius_b = rb
-        self.ma = m
-
-    '''
-    Calculate whether a ray intersects or not an item on scene 
-    '''
-    def hit(self, r, t_min, t_max):
-        oc = r.origin - self.center
-        a = oc.dot(oc)
-        b = 2* oc.dot(r.direction)
-        c = r.direction.dot(r.direction)
-        r_square_p = self.radius_a * self.radius_a + self.radius_b * self.radius_b
-        r_square_s_square = (self.radius_a * self.radius_a - self.radius_b * self.radius_b) * (self.radius_a * self.radius_a - self.radius_b * self.radius_b)
-        r_square = self.radius_a * self.radius_a 
-        a4 = c*c
-        a3 = 2*b*c
-        a2 = b*b + 2*a*c - 2*r_square_p*c + 4*r_square*r.direction.z * r.direction.z
-        a1 = 2*a*b - 2*r_square_p*b + 8*r_square*oc.z()*r.direction().z()
-        a0 = a*a - 2*r_square_p*a + 4*r_square*oc.z*oc.z + r_square_s_square
-
 
 
 
@@ -319,7 +345,7 @@ class Lambertian(Material):
         super().__init__()
         self.albedo = albedo
 
-    def scatter(self, ray, hit_info):
+    def scatter(self, ray, hit_info, attenuation):
         target = hit_info.p + hit_info.normal + random_in_unit_radius_sphere()
         scattered = Ray(hit_info.p, target - hit_info.p)
         attenuation = self.albedo
@@ -336,7 +362,7 @@ class Metal(Material):
         # it determines the fuzziness of the reflections
         self.fuzz = min(1, max(0, fuzz)) # ensures 0 <= self.fuzz <= 1
 
-    def scatter(self, ray, hit_info):
+    def scatter(self, ray, hit_info, attenuation):
         # Idea: Make ray.direction a computed property that returns the
         # unit direction vector when first accessed
         # maybe call it unit_direction and leave direction unchanged
@@ -351,26 +377,31 @@ class Metal(Material):
 
 
 class Dielectric(Material):
-    def __init__(self, refractive_index):
+    def __init__(self, a, refractive_index):
         super().__init__()
+        self.transparency = a
         self.refractive_index = refractive_index
 
-    def scatter(self, ray, hit_info):
+    def scatter(self, ray, hit_info, attenuation):
         reflected = reflect(ray.direction, hit_info.normal)
-        attenuation = Vec3(1, 1, 1)
+        attenuation.set_(self.transparency)
 
+        # if within hemisphere of normal
         if ray.direction.dot(hit_info.normal) > 0:
-            outward_normal = -hit_info.normal
+            outward_normal = -hit_info.normal # flip normal inwards
             ni_over_nt = self.refractive_index
-            cosine = self.refractive_index * ray.direction.dot(hit_info.normal) / ray.direction.length()
+            cosine = ray.direction.dot(hit_info.normal)/ray.direction.length()
+            # cosine = math.sqrt(1 - self.refractive_index * self.refractive_index*(1 - cosine * cosine))
+        # we are inside the object
         else:
             outward_normal = hit_info.normal
             ni_over_nt = 1 / self.refractive_index
             cosine = -ray.direction.dot(hit_info.normal) / ray.direction.length()
 
         refracted = refract(ray.direction, outward_normal, ni_over_nt)
+        # only sends out refraction or reflection ray, never both
         if refracted:
-            reflect_prob = schlick(cosine, self.refractive_index)
+            reflect_prob = schlick(cosine, self.refractive_index) # using fresnel approximation
         else:
             reflect_prob = 1
 
@@ -378,6 +409,48 @@ class Dielectric(Material):
             return ScatterInfo(Ray(hit_info.p, reflected), attenuation)
 
         return ScatterInfo(Ray(hit_info.p, refracted), attenuation)
+
+
+
+'''
+Random Scenes for testing
+'''
+class Scene():
+    def random_scene(self):
+        n = 10
+        list_ = []
+
+        # ground
+        list_.append(Sphere(Vec3(0, -1000, 0), 1000, Lambertian(Vec3(0.5, 0.5, 0.5))))
+
+        # inserting other items on scene
+        for _ in range(n):
+            material = random.random()
+            center = Vec3(random.random() + 0.9 * random.random(), 0.2, random.random() + 0.9 * random.random())
+            if (center - Vec3(4, 0.2, 0)).length() > 0.9:
+                # lambertian material
+                if(material < 0.8):
+                    list_.append(MovingSphere(center, center + Vec3(0, 0.5*random.random(), 0),
+                    0.0, 1.0, 0.2,
+                    Lambertian(Vec3(random.random(), random.random(), random.random()))))
+                
+                # Metalic material
+                elif(material < 0.95):
+                    list_.append(Sphere(center, 0.2, 
+                    Metal(Vec3(1+random.random(), 0.5*(1+random.random()), 0.5*(1+random.random())), 0.5*random.random())))
+
+                # Dieletric material
+                else:
+                    list_.append(Sphere(center, 0.2, 
+                    Dielectric(Vec3(random.random()/2+0.5, random.random()/2+0.5, random.random()/2+0.5), 1.5)))
+
+        # three centered spheres
+        list_.append(Sphere(Vec3(0, 1, 0), 1, Dielectric(Vec3(0.95, 0.95, 0.95), 1.5)))
+        list_.append(Sphere(Vec3(-4, 1, 0), 1, Lambertian(Vec3(0.4, 0.2, 0.1))))
+        list_.append(Sphere(Vec3(4, 1, 0), 1, Metal(Vec3(0.7, 0.6, 0.5), 0.0)))
+
+        return list_
+
 
 '''
 Methods
@@ -412,10 +485,12 @@ def refract(v, n, ni_over_nt):
     return None
 
 
+# Approximation of fresnel equation using schlick's approximation
 def schlick(cosine, refractive_index):
     r0 = (1 - refractive_index) / (1 + refractive_index)
     r0 *= r0
     return r0 + (1 - r0) * pow(1 - cosine, 5)
+
 
 
 def color(ray, world, depth):
@@ -425,7 +500,7 @@ def color(ray, world, depth):
         zero = Vec3()
 
         if depth < 50:
-            scatter_info = hit_info.material.scatter(ray, hit_info)
+            scatter_info = hit_info.material.scatter(ray, hit_info, zero)
             if scatter_info:
                 return scatter_info.attenuation * color(scatter_info.scattered, world, depth+1)
             else:
@@ -436,9 +511,9 @@ def color(ray, world, depth):
     unit_direction = ray.direction.unit()
     t = 0.5 * (unit_direction.y + 1)
     white = Vec3(1, 1, 1)
-    blue = Vec3(0.5, 0.7, 1)
+    some_color =  Vec3(0.5, 0.7, 1)
 
-    return (1-t)*white + t*blue
+    return (1-t)*white + t*some_color
 
 
 ScatterInfo = namedtuple('ScatterInfo', ['scattered', 'attenuation'])
@@ -465,28 +540,14 @@ def main():
 
     R = math.cos(math.pi / 4)
 
-    # world = HitableList([
-    #     Sphere(Vec3(0, 0, -1), 0.5, Lambertian(Vec3(0.1, 0.2, 0.5))),
-    #     Sphere(Vec3(0, -100.5, -1), 100, Lambertian(Vec3(0.8, 0.8, 0))),
-    #     Sphere(Vec3(1, 0, -1), 0.5, Metal(Vec3(0.8, 0.6, 0.2))),
-    #     Sphere(Vec3(-1, 0, -1), 0.5, Dielectric(1.5)),
-    #     Sphere(Vec3(-1, 0, -1), -0.45, Dielectric(1.5))
-    # ])
+    world = HitableList(Scene().random_scene())
 
-    world = HitableList([
-        Sphere(Vec3(1, 0, -1), 0.5, Metal(Vec3(0.8, 0.6, 0.2))),
-        Triangle(Vec3(0,0,0), Vec3(0,0,1), Vec3(0,1,1), Lambertian(Vec3(0.1, 0.2, 0.5))),
-        Sphere(Vec3(-4, 2, 0), 1.0, Lambertian(Vec3(0.4, 0.2, 0.1))),
-        Sphere(Vec3(10, 12, 0), 1.0, Dielectric(1.5))
-    ])
-
-
-    lookfrom = Vec3(-2, 2, 1)
-    lookat = Vec3(0, 0, -1)
+    lookfrom = Vec3(13.5, 1.5, 3)
+    lookat = Vec3(0.0, 0.5, -1)
     dist_to_focus = (lookfrom - lookat).length()
-    aperture = 7.1
+    aperture = 0.1
 
-    cam = PositionalCamera(lookfrom, lookat, Vec3(0, 1, 0), 90, width / height, aperture, dist_to_focus)
+    cam = PositionalCamera(lookfrom, lookat, Vec3(0, 1, 0), 20, width / height, aperture, dist_to_focus)
     ns = height # number of samples
 
 
