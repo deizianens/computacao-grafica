@@ -1,12 +1,35 @@
 import sys
+import time
 import numpy as np
 import random
 import math 
 import numbers
 import multiprocessing
+import struct
 from collections import namedtuple
 
-NUM_CPU = multiprocessing.cpu_count() * 2
+# Obj File loader
+# class FileLoader:
+#     def __init__(self, path, material=0):
+        # with open(path, 'r') as f:
+        #     triangle = -1
+        #     vertices = Vec3()
+        #     for line in f.readlines():
+        #         e = line.split()
+        #         if(len(e)):
+        #             if(triangle != -1):
+		# 				vertices[triangle] = Vec3(float(e[1]), float(e[2]), float(e[3]))
+		# 				triangle = triangle - 1
+                    
+        #             if(e[0] == "outer"):
+		# 				triangle = 2
+					
+        #             if(e[0] == "endloop"):
+		# 				list_.add(Triangle(vertices.z,vertices.y,vertices.x,material))
+					
+        #             print(list.size() + " triangles loaded.")
+
+
 
 # stores 3 values
 class Vec3:
@@ -131,6 +154,7 @@ class HitableList(list, Hitable):
             return result_info
 
         return None
+
 
 
 '''
@@ -416,8 +440,7 @@ class Dielectric(Material):
 Random Scenes for testing
 '''
 class Scene():
-    def random_scene(self):
-        n = 10
+    def random_scene(self, n):
         list_ = []
 
         # ground
@@ -448,6 +471,22 @@ class Scene():
         list_.append(Sphere(Vec3(0, 1, 0), 1, Dielectric(Vec3(0.95, 0.95, 0.95), 1.5)))
         list_.append(Sphere(Vec3(-4, 1, 0), 1, Lambertian(Vec3(0.4, 0.2, 0.1))))
         list_.append(Sphere(Vec3(4, 1, 0), 1, Metal(Vec3(0.7, 0.6, 0.5), 0.0)))
+
+        return list_
+
+
+    def triangles(self):
+        list_ = []
+        i = 0
+
+        list_.append(Triangle(Vec3(0,0,0),Vec3(0,0,1),Vec3(0,1,1), 
+                    Lambertian(Vec3(0.1, 0.1, 0.1))))
+        list_.append(Triangle(Vec3(0,0,0),Vec3(0,1,1),Vec3(0,1,0), 
+                    Lambertian(Vec3(0.5, 0.5, 0.5))))            
+
+        list_.append(Sphere(Vec3(0, 0, 0), 0.1, Dielectric(Vec3(0.95, 0.95, 0.95), 1.5)))
+        list_.append(Sphere(Vec3(-4, 1, 0), 0.1, Lambertian(Vec3(0.4, 0.2, 0.1))))
+        list_.append(Sphere(Vec3(4, 1, 0), 0.1, Metal(Vec3(0.7, 0.6, 0.5), 0.0)))
 
         return list_
 
@@ -521,6 +560,9 @@ HitInfo = namedtuple('HitInfo', ['t', 'p', 'normal', 'material'])
 
 
 def main():
+    #timer to count program execution
+    random.seed(time.time())
+
     # default image size
     width = 480
     height = 340
@@ -540,19 +582,29 @@ def main():
 
     R = math.cos(math.pi / 4)
 
-    world = HitableList(Scene().random_scene())
+    # file_ = FileLoader("teapot.stl")
 
-    lookfrom = Vec3(13.5, 1.5, 3)
-    lookat = Vec3(0.0, 0.5, -1)
+    world = HitableList(Scene().random_scene(10))
+    # world = HitableList(Scene().random_scene(500))
+
+    # book scene
+    lookfrom = Vec3(13.5, 4, 3)
+    lookat = Vec3(0.0, 1, 0)
     dist_to_focus = (lookfrom - lookat).length()
-    aperture = 0.1
+    aperture = 7.1
 
-    cam = PositionalCamera(lookfrom, lookat, Vec3(0, 1, 0), 20, width / height, aperture, dist_to_focus)
+    # lookfrom = Vec3(-5,0,0)
+    # lookat = Vec3(0,0,0)
+    # dist_to_focus = (lookfrom - lookat).length()
+    # aperture = 14
+    
+    cam = PositionalCamera(lookfrom, lookat, Vec3(0, 1, 0), 40, width / height, aperture, dist_to_focus)
     ns = height # number of samples
 
 
     # Save the PPM image as a binary file
     with open(output, 'w') as f:
+        start_time = time.time()
         f.write(f"P3\n{width} {height}\n255\n")
         for j in range(height-1, -1, -1):
             for i in range(0, width):
@@ -572,6 +624,8 @@ def main():
                 ib  = int(255.99 * col.z)  # blue channel
                 f.write(f"{ir} {ig} {ib}\n")
     
+    end_time = time.time() - start_time
+    print('Renderizado em ' + str(end_time) + ' segundos')
     f.close()
 
 if __name__ == '__main__':
