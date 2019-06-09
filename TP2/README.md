@@ -29,3 +29,7 @@ Muitos materiais são refletores imperfeitos, onde os reflexos são borrados em 
 A primeira imagem gerada foi no tamanho 200x100, para proporcionar maior rapidez de execução. Na imagem há as 3 esferas principais (cada uma com um material diferente - Lambertiano, Dielétrico e Reflectivo) + 10 esferas pequenas geradas aleatóriamente.  
   
 ![[200x100](https://ibb.co/pQnjWWt)](https://i.ibb.co/xY3qmmp/1.jpg)
+
+A segunda imagem gerada foi no tamanho 320x240, com apenas 50 esferas menores junto com as 3 principais. 
+
+![[200x100](https://ibb.co/pQnjWWt)](https://i.ibb.co/7zxGd0J/3.jpg)
