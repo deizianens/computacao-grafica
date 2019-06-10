@@ -8,28 +8,32 @@ import multiprocessing
 import struct
 from collections import namedtuple
 
+PI = 3.14159265359
+
 # Obj File loader
-# class FileLoader:
-#     def __init__(self, path, material=0):
-        # with open(path, 'r') as f:
-        #     triangle = -1
-        #     vertices = Vec3()
-        #     for line in f.readlines():
-        #         e = line.split()
-        #         if(len(e)):
-        #             if(triangle != -1):
-		# 				vertices[triangle] = Vec3(float(e[1]), float(e[2]), float(e[3]))
-		# 				triangle = triangle - 1
+class FileLoader:
+    def __init__(self, path, material=0):
+        self.list_ = []
+        with open(path, 'r') as f:
+            triangle = -1
+            vertices = [Vec3(), Vec3(), Vec3()]
+            for line in f.readlines():
+                e = line.split()
+                if(len(e)):
+                    if(triangle != -1):
+                        vertices[triangle] = Vec3(float(e[1]), float(e[2]), float(e[3]))
+                        triangle = triangle - 1
                     
-        #             if(e[0] == "outer"):
-		# 				triangle = 2
-					
-        #             if(e[0] == "endloop"):
-		# 				list_.add(Triangle(vertices.z,vertices.y,vertices.x,material))
-					
-        #             print(list.size() + " triangles loaded.")
+                    if(e[0] == "outer"):
+                        triangle = 2
+                    
+                    if(e[0] == "endloop"):
+                        self.list_.append(Triangle(vertices[2],vertices[1],vertices[0],material))
+                    
+            print(str(len(self.list_)) + " triangles loaded.")
 
-
+    def objectHL(self):
+        return HitableList(self.list_)
 
 # stores 3 values
 class Vec3:
@@ -121,16 +125,16 @@ At the core of a ray tracer is to send rays through pixels and
 compute what color is seen in the direction of those rays.
 '''
 class Ray:
-    def __init__(self, origin, direction):
+    def __init__(self, origin, direction, ti=0):
         self.origin = origin
         self.direction = direction
-        self.time = 0
+        self.time_ = ti
 
     def __call__(self, t):
-        return self.origin + t * self.direction
+        return self.origin + t*self.direction
 
-    def point_at_parameter(self, t):
-        return self.origin - (self.direction*t)
+    # def point_at_parameter(self, t):
+    #     return self.origin - (self.direction*t)
 
 
 class Hitable:
@@ -144,6 +148,7 @@ class HitableList(list, Hitable):
         closest_so_far = t_max
 
         for obj in self:
+            # print(obj)
             hit_info = obj.hit(ray, t_min, closest_so_far)
             if hit_info:
                 hit_anything = True
@@ -196,6 +201,16 @@ class Sphere(Hitable):
                 return HitInfo(t, p, normal, self.material)
 
         return None
+    
+     # Gets UV coordinates of a point p on the sphere
+    def get_sphere_uv(p):
+        phi = math.atan2(p.z, p.x)
+        theta = math.asin(p.y)
+        u = 1-(phi + PI)/(2*PI)
+        v = (theta + PI/2)/PI
+        aux = [u, v]
+        return aux
+
 
 
 class MovingSphere(Hitable):
@@ -211,7 +226,7 @@ class MovingSphere(Hitable):
     Calculate whether a ray intersects or not an item on scene 
     '''
     def hit(self, ray, t_min, t_max):
-        oc = ray.origin - self.center(ray.time)
+        oc = ray.origin - self.center(ray.time_)
         a = ray.direction.dot(ray.direction)
         b = oc.dot(ray.direction)
         c = oc.dot(oc) - self.radius*self.radius
@@ -222,7 +237,7 @@ class MovingSphere(Hitable):
             if t_min < temp < t_max:
                 t = temp
                 p = ray(t)
-                normal = (p - self.center(ray.time)) / self.radius
+                normal = (p - self.center(ray.time_)) / self.radius
 
                 return HitInfo(t, p, normal, self.material)
 
@@ -230,14 +245,14 @@ class MovingSphere(Hitable):
             if t_min < temp < t_max:
                 t = temp
                 p = ray(t)
-                normal = (p - self.center(ray.time)) / self.radius
+                normal = (p - self.center(ray.time_)) / self.radius
 
                 return HitInfo(t, p, normal, self.material)
 
         return None
-    
-    def center(self, time):
-        return self.center0 + ((self.center1 - self.center0) * ((time-self.time0)/(self.time1 - time)))
+
+    def center(self, time_):
+        return self.center0 + ((time_-self.time0)/(self.time1 - self.time0)) * (self.center1 - self.center0) 
 
 
 class Triangle(Hitable):
@@ -297,22 +312,62 @@ class Triangle(Hitable):
         return HitInfo(t, p, normal, self.material)
 
 
+# XZ Rectangle
+class XZRect(Hitable):
+    def __init__(self, _x0, _x1, _z0, _z1, _k, mat):
+        self.x0 = _x0
+        self.x1 = _x1
+        self.z0 = _z0
+        self.z1 = _z1
+        self.k = _k
+        self.mp = mat
+
+    def hit(self, r, t_min, t_max):
+        t = (self.k - r.origin.y)/r.direction.y
+        if(t < t_min or t > t_max): # cannot hit if before or past rect
+            return None
+        x = r.origin.x + t*r.direction.x
+        z = r.origin.z + t*r.direction.z
+        if(x < self.x0 or x > self.x1 or z < self.z0 or z > self.z1): # cannot hit if around rect
+            return None
+        
+        
+        p = r.point_at_parameter(t)
+        normal = Vec3(0,1,0)
+        material = self.mp
+
+        return HitInfo(t, p, normal, material)
+
+
 
 '''
 Camera classes
 '''
 class Camera:
-    def __init__(self):
-        self._lower_left_corner = Vec3(-2, -1, -1)
-        self._horizontal = Vec3(x=4)
-        self._vertical = Vec3(y=2)
-        self._origin = Vec3()
+    def __init__(self, lookfrom, lookat, vup, vfov, aspect, aperture, focus_dist, t0, t1):
+        theta = math.radians(vfov)
+        half_height = math.tan(theta / 2)
+        half_width = aspect * half_height
 
-    def ray(self, u, v):
-        # 0 <= u, v <= 1
-        return Ray(self._origin, self._lower_left_corner + u*self._horizontal + v*self._vertical)
+        # self._lower_left_corner = Vec3(-half_width, -half_height, -1)
+        self.time0 = t0
+        self.time1 = t1
+        self.lens_radius = aperture/2
+        self._origin = lookfrom
+        self.w = (lookfrom - lookat).unit()
+        self.u = vup.cross(self.w).unit()
+        self.v = self.w.cross(self.u)
+        self._lower_left_corner = lookfrom - half_width * focus_dist * self.u - half_height * focus_dist * self.v - self.w * focus_dist
+        self._horizontal = 2 * half_width * focus_dist * self.u
+        self._vertical = 2 * half_height * focus_dist * self.v
+        
+    def ray(self, s, t):
+        rd = self.lens_radius * random_in_unit_disc()
+        offset = self.u * rd.x + self.v * rd.y
+        time_ = self.time0 + np.random.random() * (self.time1-self.time0)
+        return Ray(self._origin+offset, self._lower_left_corner + s*self._horizontal + t*self._vertical - self._origin - offset, time_)
 
-
+        
 class FOVCamera:
     def __init__(self, vfov, aspect):
         # vfov is top to bottom in degrees
@@ -371,7 +426,7 @@ class Lambertian(Material):
 
     def scatter(self, ray, hit_info, attenuation):
         target = hit_info.p + hit_info.normal + random_in_unit_radius_sphere()
-        scattered = Ray(hit_info.p, target - hit_info.p)
+        scattered = Ray(hit_info.p, target - hit_info.p, ray.time_)
         attenuation = self.albedo
 
         return ScatterInfo(scattered, attenuation)
@@ -447,29 +502,43 @@ class Scene():
         list_.append(Sphere(Vec3(0, -1000, 0), 1000, Lambertian(Vec3(0.5, 0.5, 0.5))))
 
         # inserting other items on scene
-        for _ in range(n):
-            material = random.random()
-            center = Vec3(random.random() + 0.9 * random.random(), 0.2, random.random() + 0.9 * random.random())
-            if (center - Vec3(4, 0.2, 0)).length() > 0.9:
-                # lambertian material
-                if(material < 0.8):
-                    list_.append(MovingSphere(center, center + Vec3(0, 0.5*random.random(), 0),
-                    0.0, 1.0, 0.2,
-                    Lambertian(Vec3(random.random(), random.random(), random.random()))))
-                
-                # Metalic material
-                elif(material < 0.95):
-                    list_.append(Sphere(center, 0.2, 
-                    Metal(Vec3(1+random.random(), 0.5*(1+random.random()), 0.5*(1+random.random())), 0.5*random.random())))
+        for a in range(-n, n):
+            for b in range(-n, n):
+                material = np.random.random()
+                center = Vec3(a+0.9*np.random.random(), 0.2, b+0.9 *np.random.random())
+                if (center - Vec3(4, 0.2, 0)).length() > 0.9:
+                    # lambertian material
+                    if(material < 0.8):
+                        list_.append(MovingSphere(center, center + Vec3(0, 0.5*np.random.random(), 0),
+                        0.0, 1.0, 0.2,
+                        Lambertian(Vec3(np.random.random(), np.random.random(), np.random.random()))))
+                    
+                    # Metalic material
+                    elif(material < 0.95):
+                        list_.append(Sphere(center, 0.2, 
+                        Metal(Vec3(0.5*(1+np.random.random()), 0.5*(1+np.random.random()), 0.5*(1+np.random.random())), 0.5*np.random.random())))
 
-                # Dieletric material
-                else:
-                    list_.append(Sphere(center, 0.2, 
-                    Dielectric(Vec3(random.random()/2+0.5, random.random()/2+0.5, random.random()/2+0.5), 1.5)))
+                    # Dieletric material
+                    else:
+                        list_.append(Sphere(center, 0.2, 
+                        Dielectric(Vec3(np.random.random()/2+0.5, np.random.random()/2+0.5, np.random.random()/2+0.5), 1.5)))
 
         # three centered spheres
         list_.append(Sphere(Vec3(0, 1, 0), 1, Dielectric(Vec3(0.95, 0.95, 0.95), 1.5)))
-        list_.append(Sphere(Vec3(-4, 1, 0), 1, Lambertian(Vec3(0.4, 0.2, 0.1))))
+        list_.append(Sphere(Vec3(-4, 1, 0), 1, Lambertian(Vec3(0.2, 0.4, 0.2))))
+        list_.append(Sphere(Vec3(4, 1, 0), 1, Metal(Vec3(0.7, 0.6, 0.5), 0.0)))
+
+        return list_
+
+
+    def three_spheres(self):
+        list_ = []
+
+        # ground
+        list_.append(Sphere(Vec3(0, -1000, 0), 1000, Lambertian(Vec3(0.5, 0.5, 0.5))))
+        # three centered spheres        
+        list_.append(Sphere(Vec3(0, 1, 0), 1, Dielectric(Vec3(0.95, 0.95, 0.95), 1.5)))
+        list_.append(Sphere(Vec3(-4, 1, 0), 1, Lambertian(Vec3(0.2, 0.4, 0.2))))
         list_.append(Sphere(Vec3(4, 1, 0), 1, Metal(Vec3(0.7, 0.6, 0.5), 0.0)))
 
         return list_
@@ -490,6 +559,16 @@ class Scene():
 
         return list_
 
+
+    def pot(self):
+        list_ = []
+        porcelain = Metal(Vec3(1,1,1), 0.05)
+        stl = FileLoader("teapot.stl", porcelain)
+        list_.append(stl.objectHL())
+        list_.append(XZRect(-1000, 1000, -1000, 1000, 10, Metal(Vec3(0.8,0.8,0.8), 0.05)))
+        list_.append(XZRect(140, 160, 0, 50, 300, Metal(Vec3(0.8,0.8,0.8), 0.05)))
+        return list_
+    
 
 '''
 Methods
@@ -556,6 +635,8 @@ def color(ray, world, depth):
 
 
 ScatterInfo = namedtuple('ScatterInfo', ['scattered', 'attenuation'])
+
+# keeps track of current distance from last point, intersection point, normal, and material hit
 HitInfo = namedtuple('HitInfo', ['t', 'p', 'normal', 'material'])
 
 
@@ -582,10 +663,9 @@ def main():
 
     R = math.cos(math.pi / 4)
 
-    # file_ = FileLoader("teapot.stl")
-
+    # world = HitableList(Scene().pot())
     world = HitableList(Scene().random_scene(10))
-    # world = HitableList(Scene().random_scene(500))
+    # world = HitableList(Scene().three_spheres())
 
     # book scene
     lookfrom = Vec3(13.5, 4, 3)
@@ -593,13 +673,33 @@ def main():
     dist_to_focus = (lookfrom - lookat).length()
     aperture = 7.1
 
-    # lookfrom = Vec3(-5,0,0)
+    # Triangles
+    #  lookfrom = Vec3(-5,0,0)
     # lookat = Vec3(0,0,0)
     # dist_to_focus = (lookfrom - lookat).length()
     # aperture = 14
     
-    cam = PositionalCamera(lookfrom, lookat, Vec3(0, 1, 0), 40, width / height, aperture, dist_to_focus)
-    ns = height # number of samples
+    # TeaPot
+    # lookfrom = Vec3(120,80,200)
+    # lookat = Vec3(90,40,40)
+    # dist_to_focus = (lookfrom - lookat).length()
+    # aperture = 128
+    # cam = PositionalCamera(lookfrom, lookat, Vec3(0, 1, 0), 50, width / height, aperture, dist_to_focus)
+
+    # Motion Blur
+    # lookfrom = Vec3(13, 2, 3)
+    # lookat = Vec3(0, 0, 0)
+    # dist_to_focus = 10
+    # aperture = 0.0
+    # cam = Camera(lookfrom, lookat, Vec3(0, 1, 0), 20, width/height, aperture, dist_to_focus, 0, 1)
+
+    # lookfrom = Vec3(13.5, 4, 3)
+    # lookat = Vec3(0, 0, -1)
+    # dist_to_focus = (lookfrom - lookat).length()
+    # aperture = 2.0
+    cam = Camera(lookfrom, lookat, Vec3(0, 1, 0), 20, width/height, aperture, dist_to_focus, 0, 1)
+
+    ns = 100 # number of samples
 
 
     # Save the PPM image as a binary file
@@ -622,6 +722,7 @@ def main():
                 ir  = int(255.99 * col.x)  # red channel
                 ig  = int(255.99 * col.y)  # green channel
                 ib  = int(255.99 * col.z)  # blue channel
+                # print("Montando imagem: "+str(j))
                 f.write(f"{ir} {ig} {ib}\n")
     
     end_time = time.time() - start_time
