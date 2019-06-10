@@ -21,10 +21,21 @@ após cerca de 5-10 saltos a maioria das imagens não muda muito (especialmente 
 ### Ray tracing Básico
 O programa básico foi implementado de acordo com o guia do livro do Peter Shirley. O programa implementa as classes: **Vec3**, **Ray**, **Hitable**, **HitableList**, **Sphere**, **Camera (Positional Camera)** e **Material (Lambertian, Metal, Dieletric)**. Com essas classes o programa consegue simular antialiasing, diferentes materiais e _depth of field_ (defocus blur).   
 ### Novas Superfícies 
+Foram adicionados triângulos e carregamento de arquivos STL para renderizar objetos mais complicados.  
+O formato de arquivo STL usa uma série de triângulos vinculados para recriar a geometria de superfície de um modelo sólido.  
 ### Reflexões imperfeitas
-Muitos materiais são refletores imperfeitos, onde os reflexos são borrados em vários graus devido à aspereza da superfície que dispersa os raios das reflexões. Para conseguir esse efeito, as reflexões possuem um parâmetro **_fuzz_**
+Muitos materiais são refletores imperfeitos, onde os reflexos são borrados em vários graus devido à aspereza da superfície que dispersa os raios das reflexões. Para conseguir esse efeito, as reflexões possuem um parâmetro **_fuzz_**. O material refletivo tem um coeficiente de reflexão, que define a porcentagem dos raios que será refletida. Podemos adicionar um fator fuzz, que aleatoriza a direção refletida usando uma pequena esfera e escolhendo um novo ponto final para o raio.
+
 ### Abertura e Distância Focal
+Assim como numa câmera real, a cena desfoca em objetos que estejam longe do seu foco.   
+Isso ocorre usando a randomização dos raios em função da sua distância da abertura.  
+O processo é feito seguindo as instruções do livro.  
 ### Motion Blur
+Para simular o efeito de movimento na imagem fazemos como acontece em uma câmera real:  
+- Gerar raios em momentos aleatórios enquanto o obturador está aberto e interceptar o modelo naquele momento
+adicionamos um parâmetro time, na classe Ray
+- Adicionamos um intervalo de tempo no qual a câmera manda raios
+- Adicionamos um objeto em movimento à cena, no caso, Moving Sphere onde seu centro move em um intervalo de tempo
 ## Resultados Obtidos
 A primeira imagem gerada foi no tamanho 200x100, para proporcionar maior rapidez de execução. Na imagem há as 3 esferas principais (cada uma com um material diferente - Lambertiano, Dielétrico e Reflectivo) + 10 esferas pequenas geradas aleatóriamente.  
   
