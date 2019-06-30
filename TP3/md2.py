@@ -1,277 +1,310 @@
+# encoding=utf-8
 import os
+import sys
 import math
 import struct
 import numpy
 from collections import namedtuple, OrderedDict
 
+import glfw
+import OpenGL.GL.shaders as gl_shaders
+from OpenGL.GL import *
+from OpenGL.GLU import *
+
+# from PIL import Image
+
+vertex_shader = """
+#version 330 compatibility
+out vec3 normal;
+out vec4 position;
+
+void main() {
+    normal = normalize(gl_NormalMatrix * gl_Normal);
+    position = gl_ModelViewMatrix * gl_Vertex;
+    
+    gl_Position = ftransform();
+}
+"""
+
+fragment_shader = """
+#version 330 compatibility
+in vec4 position;
+in vec3 normal;
+
+uniform vec3 lightPos;
+uniform vec3 color;
+
+const float specular = 0.4;
+const float diffuse = 1.0 - specular;
+
+out vec4 outColor;
+
+void main() {
+    vec3 p = vec3(gl_ModelViewMatrix * position);
+    vec3 n = normalize(gl_NormalMatrix * normal);
+    vec3 lightDir = normalize(lightPos - p);
+    vec3 R = reflect(lightDir, n);
+    vec3 viewVec = normalize(-p);
+    
+    float diff = max(0.0, dot(lightDir, n));
+    float spec = 0.0;
+    
+    if (diff > 0.0) {
+        spec = max(0.0, dot(R, viewVec));
+        spec = pow(spec, 64.0);
+    }
+
+    float intensity = (diff * diffuse) + (spec * specular);
+    
+    vec3 ambientLight = vec3(0.15, 0.1, 0.1);
+    
+    outColor = vec4(ambientLight + color * intensity, 1.0);
+}
+"""
+
+# window size
+width, height = 800, 600
+
+# magic number. must be equal to "IDP2"
+id = 'IDP2' 
+
+# md2 version. must be equal to 8
+version = 8
+
+header_layout = namedtuple(
+    'MD2_Header',
+    [
+        'ident',         
+        'version',
+        'skin_width',       # width of the texture
+        'skin_height',      # height of the texture
+        'frame_size',       # size of one frame in bytes
+        'num_skins',        # number of textures
+        'num_vertices',     # number of vertices
+        'num_st',           # number of texture coordinates
+        'num_tris',         # number of triangles
+        'num_glcmds',       # number of opengl commands
+        'num_frames',       # total number of frames
+        'offset_skins',     # offset to skin names (64 bytes each)
+        'offset_st',        # offset to s-t texture coordinates
+        'offset_tris',      # offset to triangles
+        'offset_frames',    # offset to frame data
+        'offset_glcmds',    # offset to opengl commands
+        'offset_end'        # offset to end of file
+        ]
+    )
+
+frame_layout = namedtuple(
+    'MD2_Frame',
+    [
+        'name',
+        'vertices',
+        'normals'
+        ]
+    )
+
+triangle_layout = namedtuple(
+    'MD2_Triangles',
+    [
+        'vertex_indices',
+        'tc_indices'
+        ]
+    )
+
+# The MD2 normal look-up table
+normals_table = numpy.array(
+    [
+        [-0.525731, 0.000000, 0.850651 ],
+        [-0.442863, 0.238856, 0.864188 ],
+        [-0.295242, 0.000000, 0.955423 ],
+        [-0.309017, 0.500000, 0.809017 ],
+        [-0.162460, 0.262866, 0.951056 ],
+        [ 0.000000, 0.000000, 1.000000 ],
+        [ 0.000000, 0.850651, 0.525731 ],
+        [-0.147621, 0.716567, 0.681718 ],
+        [ 0.147621, 0.716567, 0.681718 ],
+        [ 0.000000, 0.525731, 0.850651 ],
+        [ 0.309017, 0.500000, 0.809017 ],
+        [ 0.525731, 0.000000, 0.850651 ],
+        [ 0.295242, 0.000000, 0.955423 ],
+        [ 0.442863, 0.238856, 0.864188 ],
+        [ 0.162460, 0.262866, 0.951056 ],
+        [-0.681718, 0.147621, 0.716567 ],
+        [-0.809017, 0.309017, 0.500000 ],
+        [-0.587785, 0.425325, 0.688191 ],
+        [-0.850651, 0.525731, 0.000000 ],
+        [-0.864188, 0.442863, 0.238856 ],
+        [-0.716567, 0.681718, 0.147621 ],
+        [-0.688191, 0.587785, 0.425325 ],
+        [-0.500000, 0.809017, 0.309017 ],
+        [-0.238856, 0.864188, 0.442863 ],
+        [-0.425325, 0.688191, 0.587785 ],
+        [-0.716567, 0.681718,-0.147621 ],
+        [-0.500000, 0.809017,-0.309017 ],
+        [-0.525731, 0.850651, 0.000000 ],
+        [ 0.000000, 0.850651,-0.525731 ],
+        [-0.238856, 0.864188,-0.442863 ],
+        [ 0.000000, 0.955423,-0.295242 ],
+        [-0.262866, 0.951056,-0.162460 ],
+        [ 0.000000, 1.000000, 0.000000 ],
+        [ 0.000000, 0.955423, 0.295242 ],
+        [-0.262866, 0.951056, 0.162460 ],
+        [ 0.238856, 0.864188, 0.442863 ],
+        [ 0.262866, 0.951056, 0.162460 ],
+        [ 0.500000, 0.809017, 0.309017 ],
+        [ 0.238856, 0.864188,-0.442863 ],
+        [ 0.262866, 0.951056,-0.162460 ],
+        [ 0.500000, 0.809017,-0.309017 ],
+        [ 0.850651, 0.525731, 0.000000 ],
+        [ 0.716567, 0.681718, 0.147621 ],
+        [ 0.716567, 0.681718,-0.147621 ],
+        [ 0.525731, 0.850651, 0.000000 ],
+        [ 0.425325, 0.688191, 0.587785 ],
+        [ 0.864188, 0.442863, 0.238856 ],
+        [ 0.688191, 0.587785, 0.425325 ],
+        [ 0.809017, 0.309017, 0.500000 ],
+        [ 0.681718, 0.147621, 0.716567 ],
+        [ 0.587785, 0.425325, 0.688191 ],
+        [ 0.955423, 0.295242, 0.000000 ],
+        [ 1.000000, 0.000000, 0.000000 ],
+        [ 0.951056, 0.162460, 0.262866 ],
+        [ 0.850651,-0.525731, 0.000000 ],
+        [ 0.955423,-0.295242, 0.000000 ],
+        [ 0.864188,-0.442863, 0.238856 ],
+        [ 0.951056,-0.162460, 0.262866 ],
+        [ 0.809017,-0.309017, 0.500000 ],
+        [ 0.681718,-0.147621, 0.716567 ],
+        [ 0.850651, 0.000000, 0.525731 ],
+        [ 0.864188, 0.442863,-0.238856 ],
+        [ 0.809017, 0.309017,-0.500000 ],
+        [ 0.951056, 0.162460,-0.262866 ],
+        [ 0.525731, 0.000000,-0.850651 ],
+        [ 0.681718, 0.147621,-0.716567 ],
+        [ 0.681718,-0.147621,-0.716567 ],
+        [ 0.850651, 0.000000,-0.525731 ],
+        [ 0.809017,-0.309017,-0.500000 ],
+        [ 0.864188,-0.442863,-0.238856 ],
+        [ 0.951056,-0.162460,-0.262866 ],
+        [ 0.147621, 0.716567,-0.681718 ],
+        [ 0.309017, 0.500000,-0.809017 ],
+        [ 0.425325, 0.688191,-0.587785 ],
+        [ 0.442863, 0.238856,-0.864188 ],
+        [ 0.587785, 0.425325,-0.688191 ],
+        [ 0.688191, 0.587785,-0.425325 ],
+        [-0.147621, 0.716567,-0.681718 ],
+        [-0.309017, 0.500000,-0.809017 ],
+        [ 0.000000, 0.525731,-0.850651 ],
+        [-0.525731, 0.000000,-0.850651 ],
+        [-0.442863, 0.238856,-0.864188 ],
+        [-0.295242, 0.000000,-0.955423 ],
+        [-0.162460, 0.262866,-0.951056 ],
+        [ 0.000000, 0.000000,-1.000000 ],
+        [ 0.295242, 0.000000,-0.955423 ],
+        [ 0.162460, 0.262866,-0.951056 ],
+        [-0.442863,-0.238856,-0.864188 ],
+        [-0.309017,-0.500000,-0.809017 ],
+        [-0.162460,-0.262866,-0.951056 ],
+        [ 0.000000,-0.850651,-0.525731 ],
+        [-0.147621,-0.716567,-0.681718 ],
+        [ 0.147621,-0.716567,-0.681718 ],
+        [ 0.000000,-0.525731,-0.850651 ],
+        [ 0.309017,-0.500000,-0.809017 ],
+        [ 0.442863,-0.238856,-0.864188 ],
+        [ 0.162460,-0.262866,-0.951056 ],
+        [ 0.238856,-0.864188,-0.442863 ],
+        [ 0.500000,-0.809017,-0.309017 ],
+        [ 0.425325,-0.688191,-0.587785 ],
+        [ 0.716567,-0.681718,-0.147621 ],
+        [ 0.688191,-0.587785,-0.425325 ],
+        [ 0.587785,-0.425325,-0.688191 ],
+        [ 0.000000,-0.955423,-0.295242 ],
+        [ 0.000000,-1.000000, 0.000000 ],
+        [ 0.262866,-0.951056,-0.162460 ],
+        [ 0.000000,-0.850651, 0.525731 ],
+        [ 0.000000,-0.955423, 0.295242 ],
+        [ 0.238856,-0.864188, 0.442863 ],
+        [ 0.262866,-0.951056, 0.162460 ],
+        [ 0.500000,-0.809017, 0.309017 ],
+        [ 0.716567,-0.681718, 0.147621 ],
+        [ 0.525731,-0.850651, 0.000000 ],
+        [-0.238856,-0.864188,-0.442863 ],
+        [-0.500000,-0.809017,-0.309017 ],
+        [-0.262866,-0.951056,-0.162460 ],
+        [-0.850651,-0.525731, 0.000000 ],
+        [-0.716567,-0.681718,-0.147621 ],
+        [-0.716567,-0.681718, 0.147621 ],
+        [-0.525731,-0.850651, 0.000000 ],
+        [-0.500000,-0.809017, 0.309017 ],
+        [-0.238856,-0.864188, 0.442863 ],
+        [-0.262866,-0.951056, 0.162460 ],
+        [-0.864188,-0.442863, 0.238856 ],
+        [-0.809017,-0.309017, 0.500000 ],
+        [-0.688191,-0.587785, 0.425325 ],
+        [-0.681718,-0.147621, 0.716567 ],
+        [-0.442863,-0.238856, 0.864188 ],
+        [-0.587785,-0.425325, 0.688191 ],
+        [-0.309017,-0.500000, 0.809017 ],
+        [-0.147621,-0.716567, 0.681718 ],
+        [-0.425325,-0.688191, 0.587785 ],
+        [-0.162460,-0.262866, 0.951056 ],
+        [ 0.442863,-0.238856, 0.864188 ],
+        [ 0.162460,-0.262866, 0.951056 ],
+        [ 0.309017,-0.500000, 0.809017 ],
+        [ 0.147621,-0.716567, 0.681718 ],
+        [ 0.000000,-0.525731, 0.850651 ],
+        [ 0.425325,-0.688191, 0.587785 ],
+        [ 0.587785,-0.425325, 0.688191 ],
+        [ 0.688191,-0.587785, 0.425325 ],
+        [-0.955423, 0.295242, 0.000000 ],
+        [-0.951056, 0.162460, 0.262866 ],
+        [-1.000000, 0.000000, 0.000000 ],
+        [-0.850651, 0.000000, 0.525731 ],
+        [-0.955423,-0.295242, 0.000000 ],
+        [-0.951056,-0.162460, 0.262866 ],
+        [-0.864188, 0.442863,-0.238856 ],
+        [-0.951056, 0.162460,-0.262866 ],
+        [-0.809017, 0.309017,-0.500000 ],
+        [-0.864188,-0.442863,-0.238856 ],
+        [-0.951056,-0.162460,-0.262866 ],
+        [-0.809017,-0.309017,-0.500000 ],
+        [-0.681718, 0.147621,-0.716567 ],
+        [-0.681718,-0.147621,-0.716567 ],
+        [-0.850651, 0.000000,-0.525731 ],
+        [-0.688191, 0.587785,-0.425325 ],
+        [-0.587785, 0.425325,-0.688191 ],
+        [-0.425325, 0.688191,-0.587785 ],
+        [-0.425325,-0.688191,-0.587785 ],
+        [-0.587785,-0.425325,-0.688191 ],
+        [-0.688191,-0.587785,-0.425325 ]
+    ],
+    dtype = numpy.float
+    )
+
+
 """
 Processes an MD2 file and returns mesh data in
 an easy to read and process format.
 """
-
-class MD2( object ):
-    # magic number. must be equal to "IDP2"
-    id = 'IDP2' 
-
-    # md2 version. must be equal to 8
-    version = 8
-
-    header_layout = namedtuple(
-        'MD2_Header',
-        [
-            'ident',         
-            'version',
-            'skin_width',       # width of the texture
-            'skin_height',      # height of the texture
-            'frame_size',       # size of one frame in bytes
-            'num_skins',        # number of textures
-            'num_vertices',     # number of vertices
-            'num_st',           # number of texture coordinates
-            'num_tris',         # number of triangles
-            'num_glcmds',       # number of opengl commands
-            'num_frames',       # total number of frames
-            'offset_skins',     # offset to skin names (64 bytes each)
-            'offset_st',        # offset to s-t texture coordinates
-            'offset_tris',      # offset to triangles
-            'offset_frames',    # offset to frame data
-            'offset_glcmds',    # offset to opengl commands
-            'offset_end'        # offset to end of file
-            ]
-        )
-
-    frame_layout = namedtuple(
-        'MD2_Frame',
-        [
-            'name',
-            'vertices',
-            'normals'
-            ]
-        )
-
-    triangle_layout = namedtuple(
-        'MD2_Triangles',
-        [
-            'vertex_indices',
-            'tc_indices'
-            ]
-        )
-
-    # The MD2 normal look-up table
-    normal_lookup_table = numpy.array(
-        [
-            [-0.525731, 0.000000, 0.850651 ],
-            [-0.442863, 0.238856, 0.864188 ],
-            [-0.295242, 0.000000, 0.955423 ],
-            [-0.309017, 0.500000, 0.809017 ],
-            [-0.162460, 0.262866, 0.951056 ],
-            [ 0.000000, 0.000000, 1.000000 ],
-            [ 0.000000, 0.850651, 0.525731 ],
-            [-0.147621, 0.716567, 0.681718 ],
-            [ 0.147621, 0.716567, 0.681718 ],
-            [ 0.000000, 0.525731, 0.850651 ],
-            [ 0.309017, 0.500000, 0.809017 ],
-            [ 0.525731, 0.000000, 0.850651 ],
-            [ 0.295242, 0.000000, 0.955423 ],
-            [ 0.442863, 0.238856, 0.864188 ],
-            [ 0.162460, 0.262866, 0.951056 ],
-            [-0.681718, 0.147621, 0.716567 ],
-            [-0.809017, 0.309017, 0.500000 ],
-            [-0.587785, 0.425325, 0.688191 ],
-            [-0.850651, 0.525731, 0.000000 ],
-            [-0.864188, 0.442863, 0.238856 ],
-            [-0.716567, 0.681718, 0.147621 ],
-            [-0.688191, 0.587785, 0.425325 ],
-            [-0.500000, 0.809017, 0.309017 ],
-            [-0.238856, 0.864188, 0.442863 ],
-            [-0.425325, 0.688191, 0.587785 ],
-            [-0.716567, 0.681718,-0.147621 ],
-            [-0.500000, 0.809017,-0.309017 ],
-            [-0.525731, 0.850651, 0.000000 ],
-            [ 0.000000, 0.850651,-0.525731 ],
-            [-0.238856, 0.864188,-0.442863 ],
-            [ 0.000000, 0.955423,-0.295242 ],
-            [-0.262866, 0.951056,-0.162460 ],
-            [ 0.000000, 1.000000, 0.000000 ],
-            [ 0.000000, 0.955423, 0.295242 ],
-            [-0.262866, 0.951056, 0.162460 ],
-            [ 0.238856, 0.864188, 0.442863 ],
-            [ 0.262866, 0.951056, 0.162460 ],
-            [ 0.500000, 0.809017, 0.309017 ],
-            [ 0.238856, 0.864188,-0.442863 ],
-            [ 0.262866, 0.951056,-0.162460 ],
-            [ 0.500000, 0.809017,-0.309017 ],
-            [ 0.850651, 0.525731, 0.000000 ],
-            [ 0.716567, 0.681718, 0.147621 ],
-            [ 0.716567, 0.681718,-0.147621 ],
-            [ 0.525731, 0.850651, 0.000000 ],
-            [ 0.425325, 0.688191, 0.587785 ],
-            [ 0.864188, 0.442863, 0.238856 ],
-            [ 0.688191, 0.587785, 0.425325 ],
-            [ 0.809017, 0.309017, 0.500000 ],
-            [ 0.681718, 0.147621, 0.716567 ],
-            [ 0.587785, 0.425325, 0.688191 ],
-            [ 0.955423, 0.295242, 0.000000 ],
-            [ 1.000000, 0.000000, 0.000000 ],
-            [ 0.951056, 0.162460, 0.262866 ],
-            [ 0.850651,-0.525731, 0.000000 ],
-            [ 0.955423,-0.295242, 0.000000 ],
-            [ 0.864188,-0.442863, 0.238856 ],
-            [ 0.951056,-0.162460, 0.262866 ],
-            [ 0.809017,-0.309017, 0.500000 ],
-            [ 0.681718,-0.147621, 0.716567 ],
-            [ 0.850651, 0.000000, 0.525731 ],
-            [ 0.864188, 0.442863,-0.238856 ],
-            [ 0.809017, 0.309017,-0.500000 ],
-            [ 0.951056, 0.162460,-0.262866 ],
-            [ 0.525731, 0.000000,-0.850651 ],
-            [ 0.681718, 0.147621,-0.716567 ],
-            [ 0.681718,-0.147621,-0.716567 ],
-            [ 0.850651, 0.000000,-0.525731 ],
-            [ 0.809017,-0.309017,-0.500000 ],
-            [ 0.864188,-0.442863,-0.238856 ],
-            [ 0.951056,-0.162460,-0.262866 ],
-            [ 0.147621, 0.716567,-0.681718 ],
-            [ 0.309017, 0.500000,-0.809017 ],
-            [ 0.425325, 0.688191,-0.587785 ],
-            [ 0.442863, 0.238856,-0.864188 ],
-            [ 0.587785, 0.425325,-0.688191 ],
-            [ 0.688191, 0.587785,-0.425325 ],
-            [-0.147621, 0.716567,-0.681718 ],
-            [-0.309017, 0.500000,-0.809017 ],
-            [ 0.000000, 0.525731,-0.850651 ],
-            [-0.525731, 0.000000,-0.850651 ],
-            [-0.442863, 0.238856,-0.864188 ],
-            [-0.295242, 0.000000,-0.955423 ],
-            [-0.162460, 0.262866,-0.951056 ],
-            [ 0.000000, 0.000000,-1.000000 ],
-            [ 0.295242, 0.000000,-0.955423 ],
-            [ 0.162460, 0.262866,-0.951056 ],
-            [-0.442863,-0.238856,-0.864188 ],
-            [-0.309017,-0.500000,-0.809017 ],
-            [-0.162460,-0.262866,-0.951056 ],
-            [ 0.000000,-0.850651,-0.525731 ],
-            [-0.147621,-0.716567,-0.681718 ],
-            [ 0.147621,-0.716567,-0.681718 ],
-            [ 0.000000,-0.525731,-0.850651 ],
-            [ 0.309017,-0.500000,-0.809017 ],
-            [ 0.442863,-0.238856,-0.864188 ],
-            [ 0.162460,-0.262866,-0.951056 ],
-            [ 0.238856,-0.864188,-0.442863 ],
-            [ 0.500000,-0.809017,-0.309017 ],
-            [ 0.425325,-0.688191,-0.587785 ],
-            [ 0.716567,-0.681718,-0.147621 ],
-            [ 0.688191,-0.587785,-0.425325 ],
-            [ 0.587785,-0.425325,-0.688191 ],
-            [ 0.000000,-0.955423,-0.295242 ],
-            [ 0.000000,-1.000000, 0.000000 ],
-            [ 0.262866,-0.951056,-0.162460 ],
-            [ 0.000000,-0.850651, 0.525731 ],
-            [ 0.000000,-0.955423, 0.295242 ],
-            [ 0.238856,-0.864188, 0.442863 ],
-            [ 0.262866,-0.951056, 0.162460 ],
-            [ 0.500000,-0.809017, 0.309017 ],
-            [ 0.716567,-0.681718, 0.147621 ],
-            [ 0.525731,-0.850651, 0.000000 ],
-            [-0.238856,-0.864188,-0.442863 ],
-            [-0.500000,-0.809017,-0.309017 ],
-            [-0.262866,-0.951056,-0.162460 ],
-            [-0.850651,-0.525731, 0.000000 ],
-            [-0.716567,-0.681718,-0.147621 ],
-            [-0.716567,-0.681718, 0.147621 ],
-            [-0.525731,-0.850651, 0.000000 ],
-            [-0.500000,-0.809017, 0.309017 ],
-            [-0.238856,-0.864188, 0.442863 ],
-            [-0.262866,-0.951056, 0.162460 ],
-            [-0.864188,-0.442863, 0.238856 ],
-            [-0.809017,-0.309017, 0.500000 ],
-            [-0.688191,-0.587785, 0.425325 ],
-            [-0.681718,-0.147621, 0.716567 ],
-            [-0.442863,-0.238856, 0.864188 ],
-            [-0.587785,-0.425325, 0.688191 ],
-            [-0.309017,-0.500000, 0.809017 ],
-            [-0.147621,-0.716567, 0.681718 ],
-            [-0.425325,-0.688191, 0.587785 ],
-            [-0.162460,-0.262866, 0.951056 ],
-            [ 0.442863,-0.238856, 0.864188 ],
-            [ 0.162460,-0.262866, 0.951056 ],
-            [ 0.309017,-0.500000, 0.809017 ],
-            [ 0.147621,-0.716567, 0.681718 ],
-            [ 0.000000,-0.525731, 0.850651 ],
-            [ 0.425325,-0.688191, 0.587785 ],
-            [ 0.587785,-0.425325, 0.688191 ],
-            [ 0.688191,-0.587785, 0.425325 ],
-            [-0.955423, 0.295242, 0.000000 ],
-            [-0.951056, 0.162460, 0.262866 ],
-            [-1.000000, 0.000000, 0.000000 ],
-            [-0.850651, 0.000000, 0.525731 ],
-            [-0.955423,-0.295242, 0.000000 ],
-            [-0.951056,-0.162460, 0.262866 ],
-            [-0.864188, 0.442863,-0.238856 ],
-            [-0.951056, 0.162460,-0.262866 ],
-            [-0.809017, 0.309017,-0.500000 ],
-            [-0.864188,-0.442863,-0.238856 ],
-            [-0.951056,-0.162460,-0.262866 ],
-            [-0.809017,-0.309017,-0.500000 ],
-            [-0.681718, 0.147621,-0.716567 ],
-            [-0.681718,-0.147621,-0.716567 ],
-            [-0.850651, 0.000000,-0.525731 ],
-            [-0.688191, 0.587785,-0.425325 ],
-            [-0.587785, 0.425325,-0.688191 ],
-            [-0.425325, 0.688191,-0.587785 ],
-            [-0.425325,-0.688191,-0.587785 ],
-            [-0.587785,-0.425325,-0.688191 ],
-            [-0.688191,-0.587785,-0.425325 ]
-        ],
-        dtype = numpy.float
-        )
-
-    # List of frame types used by Quake 2
-    # http://tfc.duke.free.fr/old/models/md2.htm
-    # beware: this page has a typo for the crouch_pain start frame
-    animations = OrderedDict([
-        ('stand',                (0, 39, 9.0)),
-        ('run',                  (40, 45, 10.0)),
-        ('attack',               (46, 53, 10.0)),
-        ('pain_a',               (54, 57, 7.0)),
-        ('pain_b',               (58, 61, 7.0)),
-        ('pain_c',               (62, 65, 7.0)),
-        ('jump',                 (66, 71, 7.0)),
-        ('flip',                 (72, 83, 7.0)),
-        ('salute',               (84, 94, 7.0)),
-        ('fallback',             (95, 111, 10.0)),
-        ('wave',                 (112, 122, 7.0)),
-        ('point',                (123, 134, 6.0)),
-        ('crouch_stand',         (135, 153, 10.0)),
-        ('crouch_walk',          (154, 159, 7.0)),
-        ('crouch_attack',        (160, 168, 10.0)),
-        ('crouch_pain',          (169, 172, 7.0)),
-        ('crouch_death',         (173, 177, 5.0)),
-        ('death_fallback',       (178, 183, 7.0)),
-        ('death_fallforward',    (184, 189, 7.0)),
-        ('death_fallbackslow',   (190, 197, 7.0)),
-        ('boom',                 (198, 198, 5.0)),
-        ])
-    
-    def __init__( self ):
-        super( MD2, self ).__init__()
-
+class MD2:
+    def __init__(self):
         self.header = None
         self.skins = None
         self.triangles = None
         self.tcs = None
         self.frames = None
+        self.text_id = None
 
-    def load( self, filename ):
+    def load(self, filename):
         """
         Reads the MD2 data from the existing
         specified filename.
         @param filename: the filename of the md2 file
         to load.
         """
-        with open( filename, 'rb' ) as f:
-            self.load_from_buffer( f )
+        with open(filename, 'rb') as f:
+            self.load_from_buffer(f)
     
-    def load_from_buffer( self, f ):
+    def load_from_buffer(self, f):
         """
         Reads the MD2 data from a stream object.
         Can be called instead of load() if data
@@ -279,11 +312,11 @@ class MD2( object ):
         @param f: the stream object, usually a file.
         """
         # read all the data from the file
-        self.header = self.read_header( f )
-        self.skins = self.read_skins( f, self.header )
-        self.tcs = self.read_texture_coordinates( f, self.header )
-        self.triangles = self.read_triangles( f, self.header )
-        self.frames = self.read_frames( f, self.header )
+        self.header = self.read_header(f)
+        self.skins = self.read_skins(f, self.header)
+        self.tcs = self.read_texture_coordinates(f, self.header) 
+        self.triangles = self.read_triangles(f, self.header)
+        self.frames = self.read_frames(f, self.header)
 
     @staticmethod
     def _load_block( stream, format, count ):
@@ -311,7 +344,7 @@ class MD2( object ):
         total_length = struct_length * count
         data = stream.read( total_length )
 
-        if len( data ) < total_length:
+        if(len(data) < total_length):
             raise ValueError( "MD2: Failed to read '%d' bytes" % (total_length) )
 
         return [ struct.unpack(format, chunk) for chunk in chunks(data, struct_length) ]
@@ -326,21 +359,21 @@ class MD2( object ):
         # read the header
         # header is made up of 17 signed longs
         # this first is the ID which is also a 4 byte string
-        header = MD2.header_layout._make(
+        header = header_layout._make(
             MD2._load_block( f, '< 4s16l', 1 )[ 0 ]
             )
 
-        if header.ident != MD2.id:
+        if header.ident != id:
             raise ValueError(
                 "MD2 identifier is incorrect, expected '%i', found '%i'" % (
-                    MD2.id,
+                    id,
                     header.ident
                     )
                 )
-        if header.version != MD2.version:
+        if header.version != version:
             raise ValueError(
                 "MD2 version is incorrect, expected '%i', found '%i'" % (
-                    MD2.version,
+                    version,
                     header.version
                     )
                 )
@@ -348,7 +381,7 @@ class MD2( object ):
         return header
 
     @staticmethod
-    def read_skins( f, header ):
+    def read_skins(f, header):
         """
         Reads the skin filenames out of the MD2 header.
         @param f: the file object.
@@ -369,7 +402,7 @@ class MD2( object ):
         return [ skin.rstrip('\x00') for skin in skin_struct.unpack( f.read( skin_struct.size ) ) ]
 
     @staticmethod
-    def read_texture_coordinates( f, header ):
+    def read_texture_coordinates(f, header):
         """
         Reads the texture coordinates from the MD2 file.
         @param f: the file object.
@@ -399,7 +432,7 @@ class MD2( object ):
         return tcs
 
     @staticmethod
-    def read_triangles( f, header ):
+    def read_triangles(f, header):
         """
         Reads the triangle information from the MD2 file.
         Triangle information includes the vertex and
@@ -434,13 +467,13 @@ class MD2( object ):
         vertex_indices = vertex_indices.flatten()
         tc_indices = tc_indices.flatten()
 
-        return MD2.triangle_layout(
+        return triangle_layout(
             vertex_indices,
             tc_indices
             )
 
     @staticmethod
-    def read_frames( f, header ):
+    def read_frames(f, header):
         """
         Reads all frames from the MD2 file.
         This function simply calls read_frame in a loop.
@@ -455,7 +488,7 @@ class MD2( object ):
         return [ MD2.read_frame( f, header ) for x in xrange( header.num_frames ) ]
 
     @staticmethod
-    def read_frame( f, header ):
+    def read_frame(f, header):
         """
         Reads a frame from the MD2 file.
         The stream must already be at the start of the
@@ -476,8 +509,8 @@ class MD2( object ):
             dtype = numpy.float
             )
         # extract the scale and translation vector
-        scale = frame_translations[ 0 ]
-        translation = frame_translations[ 1 ]
+        scale = frame_translations[0]
+        translation = frame_translations[1]
 
         # read the frame name
         # frame name is a 16 unsigned byte string
@@ -513,11 +546,129 @@ class MD2( object ):
         # extract the normal values
         normal_indices = frame_vertex_data[ :, 3 ]
         # convert from normal indice to normal vector
-        normals = MD2.normal_lookup_table[ normal_indices ]
+        normals = normals_table[ normal_indices ]
         normals.shape = (-1, 3)
 
-        return MD2.frame_layout(
+        return frame_layout(
             name,
             vertices,
             normals
             )
+
+    def render(self, n):
+        if n < 0 or n > self.header.num_frames - 1:
+            return
+
+        # Obtendo o frame desejado
+        frame = self.frames[n]
+
+        # glBindTexture(GL_TEXTURE_2D, self.text_id)
+
+        # Desenhando o modelo
+        glBegin(GL_TRIANGLES)
+        for i in range(self.header.num_tris):
+            # Iterando sobre cada vértice
+            for j in range(3):
+                # Compute texture coordinates
+                s = self.tcs[self.triangles[i].tc_indices[j]] / self.header.skin_width
+                t = self.tcs[self.triangles[i].tc_indices[j]] / self.header.skin_height
+
+                # /* Pass texture coordinates to OpenGL */
+                glTexCoord2f(s, t)
+
+                glNormal3fv(frame.normals)
+
+                # Calculando a posição real do vértice
+                x = frame.vertices[0]
+                y = frame.vertices[1]
+                z = frame.vertices[2]
+
+                # Desenhando aquele vértice
+                glVertex3f(x, y, z)
+        glEnd()
+
+    def draw(self):
+        glPushMatrix()
+        glRotatef(-90, 1, 0, 0)
+        glRotatef(-90, 0, 0, 1)
+        self.render(0)
+        glPopMatrix()
+
+# main method 
+def main():
+    # create model
+    model_ = MD2()
+
+    # Carregando o modelo
+    model_.load(sys.argv[1])
+     
+    # Inicializando o glfw
+    if not glfw.init():
+        print('Não foi possível inicializar o glfw')
+        exit(1)
+
+    # Criando uma janela
+    window = glfw.create_window(width, height, 'Modelo', None, None)
+    if not window:
+        print('Não foi possível criar a janela')
+        glfw.terminate()
+        exit(1)
+
+    # Definindo a posição da janela na tela
+    glfw.set_window_pos(window, 30, 60)
+
+    # Tornando a janela criada o contexto atual
+    glfw.make_context_current(window)
+
+    # Compilando e usando o shader
+    shader = gl_shaders.compileProgram(gl_shaders.compileShader(vertex_shader, GL_VERTEX_SHADER),
+                                       gl_shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
+    glUseProgram(shader)
+
+    # Definindo a cor de limpeza da tela
+    glClearColor(0.2, 0.2, 0.2, 1.0)
+
+    # Habilitando o DEPTH_TEST
+    glEnable(GL_DEPTH_TEST)
+
+    # Definindo a posição da nossa luz
+    lightPosLoc = glGetUniformLocation(shader, 'lightPos')
+    glUniform3f(lightPosLoc, 100, -100, 0)
+
+    # Definindo a cor do nosso objeto
+    colorLoc = glGetUniformLocation(shader, 'color')
+    glUniform3f(colorLoc, 1.0, 1.0, 1.0)
+
+    # Definindo a cor de limpeza da tela
+    glClearColor(0.2, 0.2, 0.2, 1.0)
+
+    # Habilitando o DEPTH_TEST
+    glEnable(GL_DEPTH_TEST)
+
+    # Definindo o tipo de projeção
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(45.0, width/height, 0.1, 500.0)
+
+    # Transladando o modelo para aparecer na tela
+    glTranslatef(0.0, 0.0, -100.0)
+
+    # MAIN LOOP
+    while not glfw.window_should_close(window):
+        # Capturando eventos
+        glfw.poll_events()
+
+        # Limpando os buffers
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        
+        model_.draw()
+
+        # Desenhando na tela
+        glfw.swap_buffers(window)
+
+    # Terminando o glfw
+    glfw.terminate()
+
+# Chamando a função principal
+if __name__ == '__main__':
+    main()
