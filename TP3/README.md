@@ -11,7 +11,7 @@ Implementação em Python de um leitor de arquivos MD2 com renderização em Ope
 
 #### Como usar o programa:
 O arquivo **md2.py** tem o main para este programa. É obrigatório informar o nome do arquivo de entrada md2 e a animação desejada. Exemplo:  
-> python md2.py STAND
+> python md2.py bauul.md2 STAND
 
 ## Estrutura do Programa
 O programa básico foi implementado de acordo com o link disponibilizado como guia: http://tfc.duke.free.fr/old/models/md2.htm. 
