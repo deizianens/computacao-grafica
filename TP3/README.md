@@ -15,7 +15,8 @@ O arquivo **md2.py** tem o main para este programa. É obrigatório informar o n
 
 ## Estrutura do Programa
 O programa básico foi implementado de acordo com o link disponibilizado como guia: http://tfc.duke.free.fr/old/models/md2.htm. 
-Pela implementação ser em Python, algumas alterações foram necessárias (em C++ o David Henry faz muito uso de ponteiros, o que dificulta bastante a tradução de codigo)
+Pela implementação ser em Python, algumas alterações foram necessárias (em C++ o David Henry faz muito uso de ponteiros, o que dificulta bastante a tradução de codigo).  
+
 Temos a classe principal MD2, que é responsável por ler o arquivo MD2 e carrega-lo. Também temos as classes de animação (Animate e AnimState), responsáveis por executar métodos relativos à animação do modelo.
-As structs do código original foram implementadas aqui como classes Python (Frame, Triangle, TextCoord etc).
+  As structs do código original foram implementadas aqui como classes Python (Frame, Triangle, TextCoord etc).
 
