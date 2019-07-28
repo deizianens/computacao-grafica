@@ -8,3 +8,6 @@ Algoritmos de Iluminação: Flat Shading, Gouraud Shading, Phong Shading
 
 ## Trabalho Prático 2
 O objetivo desse trabalho é exercitar conceitos de iluminação global através da produção um programa que realiza a renderização por ray tracing de uma cena. Deverá ser seguido como guia de implementação o livro Ray Tracing in One Weekend do Peter Shirley: https://github.com/petershirley/raytracinginoneweekend
+
+## Trabalho Prático 3
+Implementação em Python de um leitor de arquivos MD2 com renderização em OpenGL. O programa também implementa shaders e faz animação com shape interpolation.
